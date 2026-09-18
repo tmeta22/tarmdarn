@@ -1,11 +1,11 @@
 import { runPlaceCheck } from "../../../lib/check";
 import { sendTelegramMessage, formatCheckSummary } from "../../../lib/telegram";
 
+export const config = { maxDuration: 60 };
+
 /**
- * Manual check, triggered from the Controls page.
- *
- * Kept separate from /api/cron/check so the CRON_SECRET stays server-side:
- * the scheduled route is secret-gated, this one is user-initiated.
+ * Manual "Check now". Same work as the cron route, but reachable from the
+ * browser without shipping CRON_SECRET to the client.
  */
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -14,20 +14,28 @@ export default async function handler(req, res) {
   }
 
   try {
-    const results = await runPlaceCheck();
+    const { results, skipped } = await runPlaceCheck();
     const changed = results.filter((r) => r.changed).length;
     const gone = results.filter((r) => r.gone).length;
-    const failed = results.filter((r) => r.error && !r.gone).length;
+    const failed = results.filter((r) => r.error).length;
 
     const telegram = await sendTelegramMessage(
-      formatCheckSummary({ checked: results.length, changed, results, trigger: "Manual" })
+      formatCheckSummary({
+        checked: results.length,
+        changed,
+        skipped,
+        results,
+        trigger: "Manual",
+      })
     );
 
     return res.status(200).json({
       checked: results.length,
+      skipped,
       changed,
       gone,
       failed,
+      retryable: results.filter((r) => r.retryable).length,
       results,
       telegram,
     });

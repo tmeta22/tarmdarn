@@ -1,6 +1,12 @@
 import { getPlaceName, searchPlaces } from "../../../lib/places";
+import { currentQps } from "../../../lib/googleKeys";
 
 const CONCURRENCY = 4;
+
+// Pacing (lib/googleKeys) is what actually protects the quota, so this can
+// stay parallel: the workers still send at one shared, evenly spaced rate.
+// Vercel's default function timeout is 10s, which a paced batch overruns.
+export const config = { maxDuration: 60 };
 
 async function limitMap(list, worker, limit = CONCURRENCY) {
   const results = new Array(list.length);
@@ -11,7 +17,11 @@ async function limitMap(list, worker, limit = CONCURRENCY) {
       try {
         results[i] = await worker(list[i], i);
       } catch (err) {
-        results[i] = { __error: String(err?.message || err) };
+        results[i] = {
+          __error: String(err?.message || err),
+          __retryable: Boolean(err?.retryable),
+          __status: err?.status ?? null,
+        };
       }
     }
   }
@@ -56,7 +66,10 @@ async function resolveOne(candidate) {
         longitude: details.longitude ?? null,
       };
     } catch (err) {
-      if (!name) throw err;
+      // A rate-limited lookup must not degrade into a fuzzy name search —
+      // that would silently match the wrong place. Only a definitive
+      // failure (a 404, say) justifies falling back to the name.
+      if (!name || err?.retryable) throw err;
     }
   }
 
@@ -105,7 +118,13 @@ export default async function handler(req, res) {
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
     if (r && r.__error) {
-      errors.push({ index: i, row: slice[i], error: r.__error });
+      errors.push({
+        index: i,
+        row: slice[i],
+        error: r.__error,
+        retryable: r.__retryable,
+        status: r.__status,
+      });
     } else {
       resolved.push(r);
     }
@@ -115,5 +134,8 @@ export default async function handler(req, res) {
     resolved,
     errors,
     requested: slice.length,
+    // The client uses this to size the next batch so a paced run doesn't
+    // overrun the function timeout.
+    qps: Number(currentQps().toFixed(2)),
   });
 }

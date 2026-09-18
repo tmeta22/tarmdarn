@@ -5,6 +5,10 @@ const CONCURRENCY = 4;
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 200;
 
+// Requests are paced (lib/googleKeys), so a full MAX_LIMIT batch needs
+// considerably more than the default 10s function timeout.
+export const config = { maxDuration: 60 };
+
 async function limitMap(list, worker, limit = CONCURRENCY) {
   let next = 0;
   async function runOne() {

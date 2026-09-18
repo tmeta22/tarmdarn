@@ -320,11 +320,79 @@ export default function Controls() {
   const [pushStatus, setPushStatus] = useState("");
   const [resultsSource, setResultsSource] = useState("search");
 
+  // --- Google API key pool + safe scan rate ---
+  const [pool, setPool] = useState(null);
+  const [newKey, setNewKey] = useState("");
+  const [newKeyLabel, setNewKeyLabel] = useState("");
+  const [keyBusy, setKeyBusy] = useState(false);
+  const [keyMessage, setKeyMessage] = useState("");
+
+  async function loadPool() {
+    try {
+      const res = await fetch("/api/google-keys");
+      const data = await res.json();
+      if (res.ok) setPool(data);
+    } catch {
+      // Advisory panel only — a failure here must not block scanning.
+    }
+  }
+
   useEffect(() => {
     fetch("/api/places")
       .then((r) => r.json())
       .then((data) => setPlaces(Array.isArray(data) ? data : []));
+    loadPool();
   }, []);
+
+  async function submitKey(e) {
+    e.preventDefault();
+    if (!newKey.trim()) return;
+    setKeyBusy(true);
+    setKeyMessage("Checking the key against Google...");
+    try {
+      const res = await fetch("/api/google-keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: newKey.trim(), label: newKeyLabel.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setKeyMessage(data.error || "Could not save that key.");
+        return;
+      }
+      setPool(data.status);
+      setNewKey("");
+      setNewKeyLabel("");
+      setKeyMessage("Key added and verified — new scans will use it.");
+    } catch (err) {
+      setKeyMessage(String(err.message || err));
+    } finally {
+      setKeyBusy(false);
+    }
+  }
+
+  async function deleteKey(id) {
+    setKeyBusy(true);
+    setKeyMessage("");
+    try {
+      const res = await fetch("/api/google-keys", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setKeyMessage(data.error || "Could not remove that key.");
+        return;
+      }
+      setPool(data.status);
+      setKeyMessage("Key removed.");
+    } catch (err) {
+      setKeyMessage(String(err.message || err));
+    } finally {
+      setKeyBusy(false);
+    }
+  }
 
   // Re-guess which column is which whenever the file or the header
   // toggle changes. The user can override any of it afterwards.
@@ -436,6 +504,16 @@ export default function Controls() {
     }
   }
 
+  /**
+   * Batch size follows the rate the server is currently pacing at, so one
+   * request stays inside the function timeout. If the limiter has slowed
+   * down we send fewer rows per call rather than risk a 504.
+   */
+  function batchSizeFor(qps) {
+    const target = Math.round((Number(qps) || 5) * 25); // aim for ~25s per request
+    return Math.max(10, Math.min(RESOLVE_BATCH, target));
+  }
+
   async function runResolve(candidates, sourceLabel) {
     if (!Array.isArray(candidates) || candidates.length === 0) {
       setSearchStatus(`Nothing to resolve from ${sourceLabel}.`);
@@ -449,61 +527,90 @@ export default function Controls() {
       const seen = new Set();
       const merged = [];
       const errors = [];
+      let size = batchSizeFor(pool?.qps);
+      let start = 0;
 
-      // Sent in batches: the endpoint only reads RESOLVE_BATCH rows per
-      // call, and posting a whole large CSV at once overruns the request
-      // body limit (HTTP 413) while silently dropping the overflow.
-      for (let start = 0; start < candidates.length; start += RESOLVE_BATCH) {
-        const batch = candidates.slice(start, start + RESOLVE_BATCH);
-        if (candidates.length > RESOLVE_BATCH) {
+      while (start < candidates.length) {
+        const batch = candidates.slice(start, start + size);
+        if (candidates.length > size) {
           setSearchStatus(
             `Resolving ${start + 1}–${start + batch.length} of ${candidates.length} from ${sourceLabel}...`
           );
         }
 
-        const res = await fetch("/api/places/resolve", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rows: batch }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Resolve failed");
-
-        for (const base of data.resolved || []) {
-          if (seen.has(base.placeId)) continue;
-          seen.add(base.placeId);
-          // Carry over any user-supplied label/category from the candidate
-          // that produced this row.
-          const match = batch.find(
-            (c) =>
-              (c.placeId && c.placeId === base.placeId) ||
-              (!c.placeId && c.name && c.name === base.name)
-          );
-          merged.push({
-            ...base,
-            label: base.label || match?.label || null,
-            address: base.address || match?.address || base.label || null,
-            category: base.category || match?.category || null,
+        let qps = null;
+        try {
+          const res = await fetch("/api/places/resolve", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rows: batch }),
           });
+          const data = await res.json().catch(() => null);
+          if (!res.ok || !data) {
+            throw new Error(data?.error || `Server returned ${res.status}`);
+          }
+          qps = data.qps ?? null;
+
+          for (const base of data.resolved || []) {
+            if (seen.has(base.placeId)) continue;
+            seen.add(base.placeId);
+            // Carry over any user-supplied label/category from the candidate
+            // that produced this row.
+            const match = batch.find(
+              (c) =>
+                (c.placeId && c.placeId === base.placeId) ||
+                (!c.placeId && c.name && c.name === base.name)
+            );
+            merged.push({
+              ...base,
+              label: base.label || match?.label || null,
+              address: base.address || match?.address || base.label || null,
+              category: base.category || match?.category || null,
+            });
+          }
+          for (const e of data.errors || []) {
+            errors.push({ ...e, index: start + (e.index ?? 0) });
+          }
+        } catch (err) {
+          // A single bad or timed-out batch must not abandon the other six
+          // thousand rows — mark them retryable so the retry button can
+          // pick them up once the rate has settled.
+          const message = String(err?.message || err);
+          for (let i = 0; i < batch.length; i++) {
+            errors.push({ index: start + i, row: batch[i], error: message, retryable: true });
+          }
         }
-        for (const e of data.errors || []) {
-          errors.push({ ...e, index: start + (e.index ?? 0) });
-        }
+
+        start += batch.length;
+        size = batchSizeFor(qps ?? pool?.qps);
       }
 
       setResults(merged);
       setNextPageToken(null);
       setResolveErrors(errors);
+      const retryable = errors.filter((e) => e.retryable).length;
       const parts = [`Resolved ${merged.length} of ${candidates.length} from ${sourceLabel}.`];
       if (errors.length > 0) {
-        parts.push(`${errors.length} row${errors.length === 1 ? "" : "s"} failed — see list below.`);
+        parts.push(
+          retryable === errors.length
+            ? `${errors.length} row${errors.length === 1 ? "" : "s"} hit the Google rate limit — retry them below.`
+            : `${errors.length} row${errors.length === 1 ? "" : "s"} failed — see list below.`
+        );
       }
       setSearchStatus(parts.join(" "));
+      loadPool();
     } catch (err) {
       setSearchStatus(String(err.message || err));
     } finally {
       setResolving(false);
     }
+  }
+
+  /** Re-runs only the rows that failed, so a partial run is recoverable. */
+  function retryFailed() {
+    const rows = resolveErrors.filter((e) => e.row).map((e) => e.row);
+    if (rows.length === 0) return;
+    runResolve(rows, `${resultsSource} (retry)`);
   }
 
   function toggleSelected(placeId) {
@@ -796,11 +903,22 @@ export default function Controls() {
                     <Icon name="alert" />
                     Failed to resolve {resolveErrors.length} row
                     {resolveErrors.length === 1 ? "" : "s"}:
+                    <button
+                      className="btn icon-only"
+                      type="button"
+                      onClick={retryFailed}
+                      disabled={resolving}
+                      title={`Retry ${resolveErrors.length} failed rows`}
+                      aria-label={`Retry ${resolveErrors.length} failed rows`}
+                    >
+                      <Icon name="refresh" />
+                    </button>
                   </div>
                   {resolveErrors.map((e, idx) => (
                     <div className="resolve-error" key={idx}>
                       <span className="resolve-err-row">
                         {e.row?.placeId || e.row?.name || "(row)"}
+                        {e.retryable && <span className="resolve-err-tag">rate limit</span>}
                       </span>
                       <span className="resolve-err-msg">{e.error}</span>
                     </div>
@@ -819,6 +937,111 @@ export default function Controls() {
             is resolved against Google, then previewed above in the results
             list so you can add them.
           </p>
+
+          <div className="card-block capacity">
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
+                Safe scan size
+              </h3>
+              <button
+                className="btn icon-only"
+                type="button"
+                onClick={loadPool}
+                disabled={keyBusy}
+                title="Refresh API keys and rate"
+                aria-label="Refresh API keys and rate"
+              >
+                <Icon name="refresh" />
+              </button>
+            </div>
+
+            {pool ? (
+              <>
+                <div className="capacity-stats">
+                  <div>
+                    <span className="capacity-num">{pool.usableKeys}</span>
+                    <span className="capacity-label">
+                      usable key{pool.usableKeys === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="capacity-num">{pool.rowsPerMinute}</span>
+                    <span className="capacity-label">rows / minute</span>
+                  </div>
+                  <div>
+                    <span className="capacity-num">{pool.recommendedMaxRows}</span>
+                    <span className="capacity-label">safe per run</span>
+                  </div>
+                </div>
+                <p className="hint" style={{ fontSize: 12 }}>
+                  Paced at {pool.qps} requests/sec
+                  {pool.qps < pool.ceilingQps
+                    ? ` — slowed down from ${pool.ceilingQps} after Google pushed back. It recovers automatically.`
+                    : "."}{" "}
+                  A run of {pool.recommendedMaxRows} rows takes roughly ten minutes.
+                </p>
+              </>
+            ) : (
+              <p className="hint" style={{ fontSize: 12 }}>
+                Checking the key pool...
+              </p>
+            )}
+
+            {pool && pool.keys.length > 0 && (
+              <ul className="key-list">
+                {pool.keys.map((k) => (
+                  <li key={k.id} className={k.cooling ? "cooling" : ""}>
+                    <Icon name="key" />
+                    <span className="key-label">{k.label}</span>
+                    <code className="key-mask">{k.masked}</code>
+                    {k.cooling && <span className="key-state">cooling down</span>}
+                    {k.source === "db" && (
+                      <button
+                        className="btn icon-only"
+                        onClick={() => deleteKey(k.id)}
+                        disabled={keyBusy}
+                        title={`Remove ${k.label}`}
+                        aria-label={`Remove ${k.label}`}
+                      >
+                        <Icon name="trash" />
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {pool && !pool.tableReady && (
+              <p className="hint" style={{ fontSize: 12 }}>
+                Saved keys need the <code>0004_google_api_keys.sql</code> migration
+                first — until then only keys set in the environment are used.
+              </p>
+            )}
+
+            <form className="key-add" onSubmit={submitKey}>
+              <input
+                type="text"
+                value={newKey}
+                onChange={(e) => setNewKey(e.target.value)}
+                placeholder="Add another Google API key (AIza...)"
+                aria-label="New Google API key"
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <input
+                type="text"
+                value={newKeyLabel}
+                onChange={(e) => setNewKeyLabel(e.target.value)}
+                placeholder="Label (optional)"
+                aria-label="Label for the new key"
+              />
+              <button className="btn" type="submit" disabled={keyBusy || !newKey.trim()}>
+                {keyBusy ? <Icon name="refresh" /> : <Icon name="plus" />}
+                Add key
+              </button>
+            </form>
+            {keyMessage && <p className="status">{keyMessage}</p>}
+          </div>
 
           <div className="card-block">
             <div className="row" style={{ justifyContent: "space-between" }}>

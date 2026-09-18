@@ -4,6 +4,9 @@ import { sendTelegramMessage, formatDuplicatesFound } from "../../../lib/telegra
 
 const PROBE_LIMIT = 3;
 
+// Live probes are paced, so the default 10s function limit is not enough.
+export const config = { maxDuration: 60 };
+
 function norm(s) {
   return (s || "")
     .normalize("NFC")

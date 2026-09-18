@@ -1117,6 +1117,142 @@ tbody tr:hover td {
   text-align: right;
 }
 
+/* The retry button sits at the far end of the error list header. */
+.resolve-errors-head .btn {
+  margin-left: auto;
+}
+
+.resolve-err-tag {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-family: system-ui, sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--warning) 20%, transparent);
+  color: var(--warning);
+}
+
+/* ---------- API key pool / safe scan size ---------- */
+
+.capacity {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+
+.capacity-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  margin: 12px 0 10px;
+}
+
+.capacity-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.capacity-num {
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.capacity-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+
+.key-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.key-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 13px;
+  color: var(--text-subtle);
+}
+
+.key-list li.cooling {
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
+}
+
+.key-list svg {
+  flex: none;
+  color: var(--text-subtle);
+}
+
+.key-label {
+  color: var(--text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.key-mask {
+  font-size: 12px;
+  color: var(--text-subtle);
+}
+
+.key-state {
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--warning);
+}
+
+.key-list .btn {
+  margin-left: auto;
+}
+
+.key-list .btn + .key-state,
+.key-list .key-state + .btn {
+  margin-left: 8px;
+}
+
+.key-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.key-add input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  color: var(--text);
+}
+
+.key-add input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* ---------- Inline edit fields (dashboard table) ---------- */
 
 .inline-input {

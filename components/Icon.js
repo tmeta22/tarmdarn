@@ -215,6 +215,13 @@ const PATHS = {
       <path d="M5 15V5a2 2 0 0 1 2-2h10" />
     </>
   ),
+  key: (
+    <>
+      <circle cx="7.5" cy="15.5" r="3.5" />
+      <path d="m10 13 8.5-8.5" />
+      <path d="m15.5 7.5 2 2M18.5 4.5l2 2" />
+    </>
+  ),
 };
 
 export default function Icon({ name }) {
