@@ -1,5 +1,203 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORIES, guessCategoryFromPlace } from "../lib/categories";
+
+// ---------------------------------------------------------------------------
+// Lightweight CSV parser (RFC 4180-ish, no deps).
+// Handles CR/LF/CRLF line endings, quoted fields, escaped "".
+// ---------------------------------------------------------------------------
+function parseCSV(text) {
+  if (!text) return { header: [], rows: [] };
+  // Strip a possible UTF-8 BOM
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+
+  const rows = [];
+  let field = "";
+  let row = [];
+  let inQuotes = false;
+  let i = 0;
+
+  while (i < text.length) {
+    const c = text[i];
+    const n = text[i + 1];
+    if (inQuotes) {
+      if (c === '"') {
+        if (n === '"') {
+          field += '"';
+          i += 2;
+          continue;
+        }
+        inQuotes = false;
+        i++;
+        continue;
+      }
+      field += c;
+      i++;
+      continue;
+    }
+    if (c === '"') {
+      inQuotes = true;
+      i++;
+      continue;
+    }
+    if (c === ",") {
+      row.push(field);
+      field = "";
+      i++;
+      continue;
+    }
+    if (c === "\r") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+      if (n === "\n") i += 2;
+      else i += 1;
+      continue;
+    }
+    if (c === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+      i++;
+      continue;
+    }
+    field += c;
+    i++;
+  }
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  const [rawHeader, ...dataRows] = rows;
+  const header = (rawHeader || []).map((h) => (h || "").trim());
+  return {
+    header,
+    rows: dataRows
+      .filter((r) => r.some((v) => (v || "").trim() !== ""))
+      .map((r) => {
+        const obj = {};
+        for (let k = 0; k < header.length; k++) {
+          const key = header[k] || String(k);
+          obj[key] = (r[k] ?? "").trim();
+        }
+        return obj;
+      }),
+  };
+}
+
+function pick(row, keys) {
+  for (const k of keys) {
+    if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== "") {
+      return String(row[k]).trim();
+    }
+  }
+  return "";
+}
+
+function rowsToCandidates(rawRows) {
+  // Accept the app's own export CSV (place_id, label, category, current_name)
+  // as well as generic uploads with flexible header names.
+  const out = [];
+  for (const row of rawRows) {
+    const placeId = pick(row, [
+      "place_id",
+      "placeId",
+      "Place ID",
+      "place id",
+      "google_place_id",
+      "id",
+    ]);
+    const name = pick(row, [
+      "name",
+      "current_name",
+      "place name",
+      "Place Name",
+      "title",
+      "displayName",
+    ]);
+    const label = pick(row, [
+      "label",
+      "address",
+      "note",
+      "notes",
+      "Address",
+      "location",
+    ]);
+    const category = pick(row, [
+      "category",
+      "Category",
+      "type",
+      "group",
+    ]);
+    if (!placeId && !name) continue;
+    out.push({
+      placeId,
+      name,
+      address: label,
+      label,
+      category: category || null,
+    });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Scan textarea parsers: lines -> candidate rows
+// ---------------------------------------------------------------------------
+const PLACE_ID_RE = /^[A-Za-z0-9_-]{10,}$/;
+
+function parseScanLines(text) {
+  return (text || "")
+    .split(/\r?\n|\r/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+function guessScanModeFor(text) {
+  const lines = parseScanLines(text);
+  if (lines.length === 0) return null;
+  let withId = 0;
+  let withDelimiter = 0;
+  for (const l of lines) {
+    if (l.includes(",") || l.includes("\t")) withDelimiter++;
+    const first = l.split(/[,\t]/)[0].trim();
+    if (PLACE_ID_RE.test(first)) withId++;
+  }
+  if (withDelimiter > Math.floor(lines.length / 2)) return "both";
+  if (withId > Math.floor(lines.length / 2)) return "placeid";
+  return "name";
+}
+
+function parseScanAs(mode, text) {
+  const lines = parseScanLines(text);
+  const out = [];
+  for (const line of lines) {
+    if (mode === "placeid") {
+      const id = line.trim();
+      if (id) out.push({ placeId: id, name: "", address: "" });
+      continue;
+    }
+    if (mode === "name") {
+      out.push({ placeId: "", name: line, address: "" });
+      continue;
+    }
+    // "both" mode — accept CSV-ish, tab-separated, or space-prefixed place_id
+    const parts = line.includes("\t") ? line.split(/\t/) : line.split(",");
+    const a = (parts[0] || "").trim();
+    const b = (parts[1] || "").trim();
+    if (PLACE_ID_RE.test(a)) {
+      out.push({ placeId: a, name: b, address: (parts[2] || "").trim() });
+    } else if (PLACE_ID_RE.test(b)) {
+      out.push({ placeId: b, name: a, address: (parts[2] || "").trim() });
+    } else {
+      // Fall back: treat as name + optional address
+      out.push({ placeId: "", name: a, address: b });
+    }
+  }
+  return out;
+}
 
 export default function Controls() {
   const [places, setPlaces] = useState([]);
@@ -13,6 +211,13 @@ export default function Controls() {
   const [searching, setSearching] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [searchStatus, setSearchStatus] = useState("");
+
+  // --- Scan & resolve ---
+  const [scanMode, setScanMode] = useState("name");
+  const [scanText, setScanText] = useState("");
+  const [resolving, setResolving] = useState(false);
+  const [resolveErrors, setResolveErrors] = useState([]);
+  const csvInputRef = useRef(null);
 
   // --- Add by ID ---
   const [manualId, setManualId] = useState("");
@@ -42,7 +247,9 @@ export default function Controls() {
         address: r.address,
       });
       map.set(r.placeId, {
-        guessedCategory: guessed || "Other",
+        // If the row arrived with a category already (CSV upload / resolve),
+        // treat that as the auto one, falling back to the guessed one.
+        guessedCategory: r.category || guessed || "Other",
         overrideCategory: searchCategory.trim() || null,
       });
     }
@@ -59,6 +266,7 @@ export default function Controls() {
     if (!query.trim()) return;
     setSearching(true);
     setSearchStatus("");
+    setResolveErrors([]);
     try {
       const res = await fetch("/api/places/search", {
         method: "POST",
@@ -94,6 +302,7 @@ export default function Controls() {
   async function runScanAll() {
     if (!query.trim()) return;
     setScanning(true);
+    setResolveErrors([]);
     setSearchStatus("Scanning every available page — this can take a few seconds...");
     try {
       const res = await fetch("/api/places/search", {
@@ -123,6 +332,62 @@ export default function Controls() {
     }
   }
 
+  async function runResolve(candidates, sourceLabel) {
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+      setSearchStatus(`Nothing to resolve from ${sourceLabel}.`);
+      return;
+    }
+    setResolving(true);
+    setResolveErrors([]);
+    setSearchStatus(`Resolving ${candidates.length} rows from ${sourceLabel}...`);
+    try {
+      const res = await fetch("/api/places/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: candidates }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Resolve failed");
+
+      const seen = new Set();
+      const merged = [];
+      for (const base of data.resolved || []) {
+        if (seen.has(base.placeId)) continue;
+        seen.add(base.placeId);
+        // Carry over any user-supplied label/category from the candidate
+        // that produced this row.
+        const match = candidates.find(
+          (c) =>
+            (c.placeId && c.placeId === base.placeId) ||
+            (!c.placeId && c.name && c.name === base.name)
+        );
+        merged.push({
+          ...base,
+          label: base.label || match?.label || null,
+          address: base.address || match?.address || base.label || null,
+          category: base.category || match?.category || null,
+        });
+      }
+
+      setResults(merged);
+      setNextPageToken(null);
+      setResolveErrors(data.errors || []);
+      const errs = data.errors || [];
+      const parts = [];
+      parts.push(
+        `Resolved ${merged.length} of ${data.requested} from ${sourceLabel}.`
+      );
+      if (errs.length > 0) {
+        parts.push(`${errs.length} row${errs.length === 1 ? "" : "s"} failed — see list below.`);
+      }
+      setSearchStatus(parts.join(" "));
+    } catch (err) {
+      setSearchStatus(String(err.message || err));
+    } finally {
+      setResolving(false);
+    }
+  }
+
   function toggleSelected(placeId) {
     if (trackedIds.has(placeId)) return;
     setSelected((prev) => ({ ...prev, [placeId]: !prev[placeId] }));
@@ -138,7 +403,8 @@ export default function Controls() {
     const overrideCategory = searchCategory.trim() || null;
     const rows = fresh.map((p) => ({
       ...p,
-      category: overrideCategory ?? effectiveCategoryFor(p.placeId) ?? null,
+      label: p.label || p.address || null,
+      category: overrideCategory ?? p.category ?? effectiveCategoryFor(p.placeId) ?? null,
     }));
     const res = await fetch("/api/places/bulk-add", {
       method: "POST",
@@ -227,7 +493,31 @@ export default function Controls() {
     }
   }
 
+  async function handleCSVFile(file) {
+    if (!file) return;
+    setResolveErrors([]);
+    setSearchStatus(`Reading ${file.name}...`);
+    try {
+      const text = await file.text();
+      const { header, rows } = parseCSV(text);
+      const candidates = rowsToCandidates(rows);
+      if (candidates.length === 0) {
+        setSearchStatus(
+          `No usable rows found in ${file.name}. Headers found: ${
+            header.length ? header.join(", ") : "(none)"
+          }. Need at least a place_id or name column.`
+        );
+        return;
+      }
+      setSearchStatus(`Parsed ${candidates.length} rows. Resolving...`);
+      await runResolve(candidates, `CSV (${file.name})`);
+    } catch (err) {
+      setSearchStatus(`CSV read failed: ${err.message || err}`);
+    }
+  }
+
   const addableResultsCount = results.filter((r) => !trackedIds.has(r.placeId)).length;
+  const lineCount = parseScanLines(scanText).length;
 
   return (
     <div className="page">
@@ -249,7 +539,7 @@ export default function Controls() {
             Search Google Maps by name and area — e.g. "high school
             Battambang" or "market Siem Reap" — then add the ones you want
             to watch. Category is free text, so it works for any place
-            type.
+            type. Leave the Category field blank to auto-detect per result.
           </p>
           <form
             className="row"
@@ -257,6 +547,7 @@ export default function Controls() {
               e.preventDefault();
               setResults([]);
               setNextPageToken(null);
+              setResolveErrors([]);
               runSearch(null);
             }}
           >
@@ -275,7 +566,7 @@ export default function Controls() {
               value={searchCategory}
               onChange={(e) => setSearchCategory(e.target.value)}
             />
-            <button className="btn primary" type="submit" disabled={searching || scanning}>
+            <button className="btn primary" type="submit" disabled={searching || scanning || resolving}>
               {searching ? "Searching..." : "Search"}
             </button>
           </form>
@@ -303,7 +594,10 @@ export default function Controls() {
                         <div className="name">{r.name}</div>
                         <div className="addr">{r.address}</div>
                       </div>
-                      <span className={`badge${wasGuessed ? " auto" : ""}`} title={wasGuessed ? "Auto-detected from scan" : "Manual override"}>
+                      <span
+                        className={`badge${wasGuessed ? " auto" : ""}`}
+                        title={wasGuessed ? "Auto-detected from scan / upload" : "Manual override"}
+                      >
                         {effective}
                       </span>
                       {isTracked && <span className="badge">Already tracked</span>}
@@ -312,7 +606,7 @@ export default function Controls() {
                 })}
               </div>
               <div className="row" style={{ marginTop: 14 }}>
-                <button className="btn primary" onClick={addSelected}>
+                <button className="btn primary" onClick={addSelected} disabled={addableResultsCount === 0}>
                   Add selected
                 </button>
                 <button
@@ -326,18 +620,144 @@ export default function Controls() {
                   <button
                     className="btn"
                     onClick={() => runSearch(nextPageToken)}
-                    disabled={searching || scanning}
+                    disabled={searching || scanning || resolving}
                   >
                     {searching ? "Loading..." : "Load more results"}
                   </button>
                 )}
-                <button className="btn" onClick={runScanAll} disabled={searching || scanning}>
+                <button className="btn" onClick={runScanAll} disabled={searching || scanning || resolving}>
                   {scanning ? "Scanning..." : "Scan all pages"}
                 </button>
               </div>
+              {resolveErrors.length > 0 && (
+                <div className="resolve-errors scroll-panel">
+                  <div className="resolve-errors-head">
+                    Failed to resolve {resolveErrors.length} row
+                    {resolveErrors.length === 1 ? "" : "s"}:
+                  </div>
+                  {resolveErrors.map((e, idx) => (
+                    <div className="resolve-error" key={idx}>
+                      <span className="resolve-err-row">
+                        {e.row?.placeId || e.row?.name || "(row)"}
+                      </span>
+                      <span className="resolve-err-msg">{e.error}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           )}
           {searchStatus && <p className="status">{searchStatus}</p>}
+        </div>
+
+        <div className="bento-card bento-card--wide">
+          <h2>Scan &amp; resolve</h2>
+          <p className="hint">
+            Upload a CSV, or paste lines below and choose a mode. Each row
+            is resolved against Google, then previewed above in the results
+            list so you can add them.
+          </p>
+
+          <div className="card-block">
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>CSV upload</h3>
+              <span className="hint" style={{ fontSize: 12, margin: 0 }}>
+                Export format: columns <code>place_id</code>, <code>name</code> /{" "}
+                <code>current_name</code>, <code>label</code> / <code>address</code>,{" "}
+                <code>category</code>
+              </span>
+            </div>
+            <div className="row" style={{ marginTop: 10 }}>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                ref={csvInputRef}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  handleCSVFile(f);
+                  if (csvInputRef.current) csvInputRef.current.value = "";
+                }}
+                style={{ fontSize: 13 }}
+              />
+            </div>
+          </div>
+
+          <div className="card-block">
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Paste lines</h3>
+              <div className="row" style={{ gap: 6 }}>
+                <button
+                  className={`btn chip${scanMode === "name" ? " active" : ""}`}
+                  onClick={() => setScanMode("name")}
+                  type="button"
+                >
+                  By name
+                </button>
+                <button
+                  className={`btn chip${scanMode === "placeid" ? " active" : ""}`}
+                  onClick={() => setScanMode("placeid")}
+                  type="button"
+                >
+                  By place_id
+                </button>
+                <button
+                  className={`btn chip${scanMode === "both" ? " active" : ""}`}
+                  onClick={() => setScanMode("both")}
+                  type="button"
+                >
+                  By both
+                </button>
+                <button
+                  className="btn chip ghost"
+                  onClick={() => {
+                    const detected = guessScanModeFor(scanText);
+                    if (detected) setScanMode(detected);
+                  }}
+                  type="button"
+                  disabled={!parseScanLines(scanText).length}
+                >
+                  Auto mode
+                </button>
+              </div>
+            </div>
+            <textarea
+              className="scan-textarea"
+              value={scanText}
+              onChange={(e) => setScanText(e.target.value)}
+              placeholder={
+                scanMode === "name"
+                  ? "One name per line, optionally with an area. e.g.:\nវិទ្យាល័យ ពោធិ៍សែន ភ្នំពេញ\nRoyal Palace Phnom Penh"
+                  : scanMode === "placeid"
+                  ? "One place_id per line. e.g.:\nChIJM8qG5qs3DDERP162lCD26pY\nChIJ...XYZ"
+                  : "One row per line as `place_id, name[, address]` or `name, place_id[, address]`. Comma or tab separated."
+              }
+              rows={7}
+            />
+            <div className="row" style={{ marginTop: 10 }}>
+              <button
+                className="btn primary"
+                disabled={resolving || lineCount === 0}
+                onClick={() => {
+                  const cands = parseScanAs(scanMode, scanText);
+                  if (cands.length === 0) {
+                    setSearchStatus("No rows to scan.");
+                    return;
+                  }
+                  runResolve(cands, `paste (${scanMode})`);
+                }}
+              >
+                {resolving ? "Resolving..." : `Resolve ${lineCount} row${lineCount === 1 ? "" : "s"}`}
+              </button>
+              <button
+                className="btn"
+                onClick={() => setScanText("")}
+                disabled={!scanText}
+                type="button"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="bento-card">
