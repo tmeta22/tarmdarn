@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
-import { CATEGORIES } from "../lib/categories";
+import { useEffect, useMemo, useState } from "react";
+import { CATEGORIES, guessCategoryFromPlace } from "../lib/categories";
 
 export default function Controls() {
   const [places, setPlaces] = useState([]);
 
   // --- Search & discover ---
   const [query, setQuery] = useState("");
-  const [searchCategory, setSearchCategory] = useState("School");
+  const [searchCategory, setSearchCategory] = useState("");
   const [results, setResults] = useState([]);
   const [nextPageToken, setNextPageToken] = useState(null);
   const [selected, setSelected] = useState({});
@@ -31,6 +31,29 @@ export default function Controls() {
   }, []);
 
   const trackedIds = new Set(places.map((p) => p.place_id));
+
+  const resultMeta = useMemo(() => {
+    const map = new Map();
+    for (const r of results) {
+      const guessed = guessCategoryFromPlace({
+        primaryType: r.primaryType,
+        types: r.types,
+        name: r.name,
+        address: r.address,
+      });
+      map.set(r.placeId, {
+        guessedCategory: guessed || "Other",
+        overrideCategory: searchCategory.trim() || null,
+      });
+    }
+    return map;
+  }, [results, searchCategory]);
+
+  function effectiveCategoryFor(placeId) {
+    const m = resultMeta.get(placeId);
+    if (!m) return searchCategory.trim() || "Other";
+    return m.overrideCategory || m.guessedCategory;
+  }
 
   async function runSearch(pageToken) {
     if (!query.trim()) return;
@@ -112,10 +135,15 @@ export default function Controls() {
       return;
     }
     setSearchStatus(`Adding ${fresh.length}...`);
+    const overrideCategory = searchCategory.trim() || null;
+    const rows = fresh.map((p) => ({
+      ...p,
+      category: overrideCategory ?? effectiveCategoryFor(p.placeId) ?? null,
+    }));
     const res = await fetch("/api/places/bulk-add", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ places: fresh, category: searchCategory.trim() || null }),
+      body: JSON.stringify({ places: rows, category: overrideCategory }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -243,7 +271,7 @@ export default function Controls() {
               className="cat-input"
               list="category-suggestions"
               type="text"
-              placeholder="Category"
+              placeholder="Category (auto)"
               value={searchCategory}
               onChange={(e) => setSearchCategory(e.target.value)}
             />
@@ -257,6 +285,9 @@ export default function Controls() {
               <div className="results scroll-panel">
                 {results.map((r) => {
                   const isTracked = trackedIds.has(r.placeId);
+                  const effective = effectiveCategoryFor(r.placeId);
+                  const m = resultMeta.get(r.placeId);
+                  const wasGuessed = m && !m.overrideCategory;
                   return (
                     <label
                       className={`result-item${isTracked ? " tracked" : ""}`}
@@ -268,10 +299,13 @@ export default function Controls() {
                         disabled={isTracked}
                         onChange={() => toggleSelected(r.placeId)}
                       />
-                      <div>
+                      <div className="grow">
                         <div className="name">{r.name}</div>
                         <div className="addr">{r.address}</div>
                       </div>
+                      <span className={`badge${wasGuessed ? " auto" : ""}`} title={wasGuessed ? "Auto-detected from scan" : "Manual override"}>
+                        {effective}
+                      </span>
                       {isTracked && <span className="badge">Already tracked</span>}
                     </label>
                   );

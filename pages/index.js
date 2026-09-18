@@ -10,6 +10,32 @@ const SORT_OPTIONS = [
   { value: "created_desc", label: "Recently added" },
 ];
 
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      className="copy-btn"
+      title="Copy place_id"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          document.body.removeChild(ta);
+        }
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1400);
+      }}
+    >
+      {copied ? "✓" : "⧉"}
+    </button>
+  );
+}
+
 function nextCheckDate() {
   const now = new Date();
   const next = new Date(
@@ -148,6 +174,12 @@ export default function Dashboard() {
               {categoryLabel(p.category)}
             </span>
           </td>
+          <td>
+            <div className="place-id-cell">
+              <code className="place-id">{p.place_id}</code>
+              <CopyButton text={p.place_id} />
+            </div>
+          </td>
           <td className="addr">
             {p.last_checked_at ? new Date(p.last_checked_at).toLocaleString() : "never"}
           </td>
@@ -164,7 +196,7 @@ export default function Dashboard() {
         </tr>
         {openHistoryFor === p.place_id && (
           <tr>
-            <td colSpan={4}>
+            <td colSpan={5}>
               <div className="history">
                 {!hist ? (
                   "Loading..."
@@ -298,6 +330,7 @@ export default function Dashboard() {
                   <tr>
                     <th>Name</th>
                     <th>Category</th>
+                    <th>Place ID</th>
                     <th>Last checked</th>
                     <th></th>
                   </tr>
@@ -307,7 +340,7 @@ export default function Dashboard() {
                     ? groupedPlaces.map(([groupName, groupPlaces]) => (
                         <Fragment key={groupName}>
                           <tr className="group-row">
-                            <td colSpan={4}>
+                            <td colSpan={5}>
                               {groupName} · {groupPlaces.length}
                             </td>
                           </tr>

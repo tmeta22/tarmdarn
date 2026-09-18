@@ -32,7 +32,7 @@ export default async function handler(req, res) {
 
   const rows = toInsert.map((p) => ({
     place_id: p.placeId,
-    category: category ?? null,
+    category: p.category ?? category ?? null,
     label: p.address ?? null,
     current_name: p.name ?? null,
     last_checked_at: new Date().toISOString(),
