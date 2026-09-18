@@ -1,15 +1,21 @@
 import { supabase } from "../../../lib/supabase";
 
+// Excel ignores the charset in Content-Type when opening a .csv and falls
+// back to the system ANSI codepage, which mangles Khmer text. A leading
+// UTF-8 BOM is the only reliable signal that the file is UTF-8. The
+// importer strips it back off, so round-trips stay clean.
+const BOM = "\uFEFF";
+
 function toCsv(rows, columns) {
   const esc = (v) => {
     if (v === null || v === undefined) return "";
     const s = String(v);
-    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
     return s;
   };
   const header = columns.map((c) => esc(c.label)).join(",");
   const lines = rows.map((r) => columns.map((c) => esc(r[c.key])).join(","));
-  return [header, ...lines].join("\n");
+  return BOM + [header, ...lines].join("\n");
 }
 
 export default async function handler(req, res) {
