@@ -79,6 +79,7 @@ export default function Dashboard() {
   const [sortBy, setSortBy] = useState("name_asc");
   const [groupByCategory, setGroupByCategory] = useState(false);
   const [view, setView] = useState("table");
+  const [nextCheck, setNextCheck] = useState(null);
 
   // Restore the last view mode, then keep it in sync as it changes.
   useEffect(() => {
@@ -115,6 +116,10 @@ export default function Dashboard() {
     loadPlaces();
     loadStats();
     loadRecent();
+    // Rendered on the client only: the formatted string depends on the
+    // viewer's locale and time zone, which the server can't know, so
+    // formatting it during SSR mismatches on hydration.
+    setNextCheck(nextCheckDate());
   }, []);
 
   function startEditing(p) {
@@ -505,8 +510,6 @@ export default function Dashboard() {
     );
   }
 
-  const next = nextCheckDate();
-
   const dupCount = duplicates?.length ?? null;
 
   return (
@@ -590,12 +593,14 @@ export default function Dashboard() {
             Next auto-check
           </div>
           <div className="bento-value bento-value-sm">
-            {next.toLocaleString(undefined, {
-              month: "short",
-              day: "numeric",
-              hour: "numeric",
-              minute: "2-digit",
-            })}
+            {nextCheck
+              ? nextCheck.toLocaleString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })
+              : "—"}
           </div>
           <div className="bento-foot">7:00 AM Phnom Penh · daily</div>
         </div>

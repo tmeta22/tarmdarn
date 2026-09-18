@@ -85,6 +85,10 @@ function parseCSV(text) {
 // ---------------------------------------------------------------------------
 const PLACE_ID_RE = /^[A-Za-z0-9_-]{10,}$/;
 
+// Must not exceed the per-request cap in /api/places/resolve — the client
+// splits large inputs into batches of this size.
+const RESOLVE_BATCH = 100;
+
 // ---------------------------------------------------------------------------
 // CSV column mapping
 //
@@ -428,44 +432,57 @@ export default function Controls() {
     setResolveErrors([]);
     setSearchStatus(`Resolving ${candidates.length} rows from ${sourceLabel}...`);
     try {
-      const res = await fetch("/api/places/resolve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: candidates }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Resolve failed");
-
       const seen = new Set();
       const merged = [];
-      for (const base of data.resolved || []) {
-        if (seen.has(base.placeId)) continue;
-        seen.add(base.placeId);
-        // Carry over any user-supplied label/category from the candidate
-        // that produced this row.
-        const match = candidates.find(
-          (c) =>
-            (c.placeId && c.placeId === base.placeId) ||
-            (!c.placeId && c.name && c.name === base.name)
-        );
-        merged.push({
-          ...base,
-          label: base.label || match?.label || null,
-          address: base.address || match?.address || base.label || null,
-          category: base.category || match?.category || null,
+      const errors = [];
+
+      // Sent in batches: the endpoint only reads RESOLVE_BATCH rows per
+      // call, and posting a whole large CSV at once overruns the request
+      // body limit (HTTP 413) while silently dropping the overflow.
+      for (let start = 0; start < candidates.length; start += RESOLVE_BATCH) {
+        const batch = candidates.slice(start, start + RESOLVE_BATCH);
+        if (candidates.length > RESOLVE_BATCH) {
+          setSearchStatus(
+            `Resolving ${start + 1}–${start + batch.length} of ${candidates.length} from ${sourceLabel}...`
+          );
+        }
+
+        const res = await fetch("/api/places/resolve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: batch }),
         });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Resolve failed");
+
+        for (const base of data.resolved || []) {
+          if (seen.has(base.placeId)) continue;
+          seen.add(base.placeId);
+          // Carry over any user-supplied label/category from the candidate
+          // that produced this row.
+          const match = batch.find(
+            (c) =>
+              (c.placeId && c.placeId === base.placeId) ||
+              (!c.placeId && c.name && c.name === base.name)
+          );
+          merged.push({
+            ...base,
+            label: base.label || match?.label || null,
+            address: base.address || match?.address || base.label || null,
+            category: base.category || match?.category || null,
+          });
+        }
+        for (const e of data.errors || []) {
+          errors.push({ ...e, index: start + (e.index ?? 0) });
+        }
       }
 
       setResults(merged);
       setNextPageToken(null);
-      setResolveErrors(data.errors || []);
-      const errs = data.errors || [];
-      const parts = [];
-      parts.push(
-        `Resolved ${merged.length} of ${data.requested} from ${sourceLabel}.`
-      );
-      if (errs.length > 0) {
-        parts.push(`${errs.length} row${errs.length === 1 ? "" : "s"} failed — see list below.`);
+      setResolveErrors(errors);
+      const parts = [`Resolved ${merged.length} of ${candidates.length} from ${sourceLabel}.`];
+      if (errors.length > 0) {
+        parts.push(`${errors.length} row${errors.length === 1 ? "" : "s"} failed — see list below.`);
       }
       setSearchStatus(parts.join(" "));
     } catch (err) {
