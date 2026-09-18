@@ -544,6 +544,216 @@ input[type="file"]::file-selector-button:hover {
   color: var(--jade);
 }
 
+.inline-input {
+  margin-top: 4px;
+  width: 100%;
+  max-width: 320px;
+  background: var(--bg-soft);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+}
+
+.inline-input:focus {
+  border-color: var(--jade);
+}
+
+.inline-input.cat-edit {
+  max-width: 220px;
+  margin-top: 0;
+}
+
+.inline-ok,
+.inline-err {
+  font-size: 11px;
+  margin-top: 4px;
+  letter-spacing: 0.01em;
+}
+
+.inline-ok {
+  color: var(--jade);
+}
+
+.inline-err {
+  color: var(--danger);
+}
+
+tr.editing-row {
+  background: rgba(79, 189, 160, 0.05);
+}
+
+td > .name-line {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.badge.uncategorized {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-dim);
+  border-color: rgba(148, 163, 184, 0.35);
+  font-style: italic;
+}
+
+.accent-ruby {
+  background: linear-gradient(
+      135deg,
+      rgba(217, 112, 95, 0.18),
+      rgba(217, 112, 95, 0.04) 60%
+    ),
+    var(--panel);
+  border-color: rgba(217, 112, 95, 0.45);
+}
+
+.dup-card h2 {
+  font-size: 16px;
+}
+
+.dup-list {
+  margin-top: 14px;
+  max-height: 520px;
+  padding: 4px 2px;
+}
+
+.dup-cluster {
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 12px 14px 14px;
+  margin-bottom: 14px;
+  background: rgba(15, 23, 42, 0.32);
+}
+
+.dup-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.dup-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.dup-head-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dup-badge.ok {
+  background: var(--jade-soft);
+  border-color: rgba(79, 189, 160, 0.45);
+  color: var(--jade);
+}
+
+.dup-badge.bad {
+  background: rgba(217, 112, 95, 0.14);
+  border-color: rgba(217, 112, 95, 0.4);
+  color: var(--danger);
+}
+
+.dup-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dup-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.015);
+  cursor: pointer;
+}
+
+.dup-row:hover {
+  border-color: rgba(79, 189, 160, 0.35);
+}
+
+.dup-row.alive {
+  border-left: 3px solid var(--jade);
+}
+
+.dup-row.dead {
+  border-left: 3px solid var(--danger);
+  opacity: 0.85;
+  background: rgba(217, 112, 95, 0.04);
+}
+
+.dup-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.dup-row-name {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.dup-row-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.dup-row-meta .addr {
+  display: inline;
+}
+
+.dup-row-probe {
+  font-size: 12px;
+  text-align: right;
+  flex: none;
+}
+
+.probe {
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.probe.ok {
+  color: var(--jade);
+}
+.probe.bad {
+  color: var(--danger);
+}
+.probe.warn {
+  color: var(--accent);
+}
+
+.dup-suggest {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--jade);
+}
+
+.dup-actions {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.dup-status {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+
 table {
   width: 100%;
   border-collapse: collapse;

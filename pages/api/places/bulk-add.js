@@ -1,4 +1,5 @@
 import { supabase } from "../../../lib/supabase";
+import { guessCategoryFromPlace } from "../../../lib/categories";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -30,13 +31,25 @@ export default async function handler(req, res) {
     return res.status(200).json({ added: 0, skipped, places: [] });
   }
 
-  const rows = toInsert.map((p) => ({
-    place_id: p.placeId,
-    category: p.category ?? category ?? null,
-    label: p.address ?? null,
-    current_name: p.name ?? null,
-    last_checked_at: new Date().toISOString(),
-  }));
+  const rows = toInsert.map((p) => {
+    const rowCategory =
+      (p.category && String(p.category).trim()) ||
+      (category && String(category).trim()) ||
+      guessCategoryFromPlace({
+        primaryType: p.primaryType,
+        types: p.types,
+        name: p.name,
+        address: p.address,
+      }) ||
+      null;
+    return {
+      place_id: p.placeId,
+      category: rowCategory,
+      label: p.label || p.address || null,
+      current_name: p.name ?? null,
+      last_checked_at: new Date().toISOString(),
+    };
+  });
 
   const { data, error } = await db.from("tracked_places").insert(rows).select();
 

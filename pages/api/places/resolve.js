@@ -49,9 +49,9 @@ async function resolveOne(candidate) {
       resolved = {
         placeId: details.canonicalPlaceId || placeId,
         name: details.name || name || null,
-        address: address || null,
-        primaryType: null,
-        types: [],
+        address: details.address || address || null,
+        primaryType: details.primaryType || null,
+        types: Array.isArray(details.types) ? details.types : [],
       };
     } catch (err) {
       if (!name) throw err;

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { categoryLabel } from "../lib/categories";
+import { CATEGORIES, categoryLabel } from "../lib/categories";
 
 const SORT_OPTIONS = [
   { value: "name_asc", label: "Name (A–Z)" },
@@ -54,6 +54,15 @@ export default function Dashboard() {
   const [openHistoryFor, setOpenHistoryFor] = useState(null);
   const [historyByPlace, setHistoryByPlace] = useState({});
 
+  const [editing, setEditing] = useState(null); // { placeId, category, label }
+  const [editStatus, setEditStatus] = useState({}); // placeId -> "saving" | "saved" | err
+
+  const [duplicates, setDuplicates] = useState(null);
+  const [loadingDup, setLoadingDup] = useState(false);
+  const [duplicatesError, setDuplicatesError] = useState(null);
+  const [dupStatus, setDupStatus] = useState({}); // clusterIdx -> "merging" | okMsg | errMsg
+  const [canonicalChoice, setCanonicalChoice] = useState({}); // clusterIdx -> placeId
+
   const [filterText, setFilterText] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [sortBy, setSortBy] = useState("name_asc");
@@ -84,6 +93,90 @@ export default function Dashboard() {
     loadStats();
     loadRecent();
   }, []);
+
+  function startEditing(p) {
+    setEditing({
+      placeId: p.place_id,
+      category: p.category || "",
+      label: p.label || "",
+    });
+  }
+
+  function cancelEditing() {
+    setEditing(null);
+  }
+
+  async function saveEditing(placeId) {
+    if (!editing || editing.placeId !== placeId) return;
+    setEditStatus((s) => ({ ...s, [placeId]: "saving" }));
+    try {
+      const res = await fetch("/api/places", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          place_id: placeId,
+          category: editing.category,
+          label: editing.label,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Save failed");
+      setPlaces((prev) => prev.map((p) => (p.place_id === placeId ? { ...p, ...data } : p)));
+      setEditStatus((s) => ({ ...s, [placeId]: "saved" }));
+      setTimeout(() => {
+        setEditStatus((s) => {
+          const copy = { ...s };
+          delete copy[placeId];
+          return copy;
+        });
+      }, 1500);
+      setEditing(null);
+    } catch (err) {
+      setEditStatus((s) => ({ ...s, [placeId]: String(err.message || err) }));
+    }
+  }
+
+  async function fetchDuplicates() {
+    setLoadingDup(true);
+    setDuplicatesError(null);
+    try {
+      const res = await fetch("/api/places/duplicates");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to scan");
+      setDuplicates(data.clusters || []);
+    } catch (err) {
+      setDuplicatesError(String(err.message || err));
+    } finally {
+      setLoadingDup(false);
+    }
+  }
+
+  async function performMerge(clusterIdx) {
+    const cluster = duplicates?.[clusterIdx];
+    if (!cluster) return;
+    const canonical =
+      canonicalChoice[clusterIdx] || cluster.canonicalPlaceId || cluster.placeIds[0];
+    const removeIds = cluster.placeIds.filter((id) => id !== canonical);
+    if (removeIds.length === 0) return;
+    setDupStatus((s) => ({ ...s, [clusterIdx]: "merging" }));
+    try {
+      const res = await fetch("/api/places/duplicates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ canonicalPlaceId: canonical, removePlaceIds: removeIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Merge failed");
+      setDupStatus((s) => ({
+        ...s,
+        [clusterIdx]: `Merged — kept ${canonical}${data.patched ? " (label/category filled in)" : ""}`,
+      }));
+      await Promise.all([loadPlaces(), loadStats()]);
+      setTimeout(() => fetchDuplicates(), 300);
+    } catch (err) {
+      setDupStatus((s) => ({ ...s, [clusterIdx]: String(err.message || err) }));
+    }
+  }
 
   const availableCategories = useMemo(() => {
     const set = new Set();
@@ -162,17 +255,57 @@ export default function Dashboard() {
   function renderPlaceRow(p) {
     const hist = historyByPlace[p.place_id];
     const wasRenamed = hist && hist.length > 0;
+    const isEditing = editing?.placeId === p.place_id;
+    const editStatusFor = editStatus[p.place_id];
+
     return (
       <Fragment key={p.place_id}>
-        <tr>
+        <tr className={isEditing ? "editing-row" : ""}>
           <td>
-            <div>{p.current_name || "(unknown)"}</div>
-            {p.label && <div className="addr">{p.label}</div>}
+            <div className="name-line">{p.current_name || "(unknown)"}</div>
+            {isEditing ? (
+              <input
+                className="inline-input"
+                type="text"
+                placeholder="Note / address"
+                value={editing.label}
+                onChange={(e) => setEditing({ ...editing, label: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveEditing(p.place_id);
+                  if (e.key === "Escape") cancelEditing();
+                }}
+              />
+            ) : p.label ? (
+              <div className="addr">{p.label}</div>
+            ) : null}
           </td>
           <td>
-            <span className={`badge ${wasRenamed ? "renamed" : ""}`}>
-              {categoryLabel(p.category)}
-            </span>
+            {isEditing ? (
+              <input
+                className="inline-input cat-edit"
+                list="category-suggestions-table"
+                type="text"
+                placeholder="Category"
+                value={editing.category}
+                onChange={(e) => setEditing({ ...editing, category: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveEditing(p.place_id);
+                  if (e.key === "Escape") cancelEditing();
+                }}
+              />
+            ) : (
+              <span
+                className={`badge ${wasRenamed ? "renamed" : ""}${
+                  !p.category ? " uncategorized" : ""
+                }`}
+              >
+                {categoryLabel(p.category)}
+              </span>
+            )}
+            {editStatusFor && editStatusFor !== "saving" && editStatusFor !== "saved" && (
+              <div className="inline-err">{editStatusFor}</div>
+            )}
+            {editStatusFor === "saved" && <div className="inline-ok">Saved</div>}
           </td>
           <td>
             <div className="place-id-cell">
@@ -185,10 +318,32 @@ export default function Dashboard() {
           </td>
           <td>
             <div className="row" style={{ justifyContent: "flex-end" }}>
+              {isEditing ? (
+                <>
+                  <button
+                    className="btn primary"
+                    disabled={editStatusFor === "saving"}
+                    onClick={() => saveEditing(p.place_id)}
+                  >
+                    {editStatusFor === "saving" ? "Saving..." : "Save"}
+                  </button>
+                  <button className="btn" disabled={editStatusFor === "saving"} onClick={cancelEditing}>
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button className="btn" onClick={() => startEditing(p)}>
+                  Edit
+                </button>
+              )}
               <button className="btn" onClick={() => toggleHistory(p.place_id)}>
                 History
               </button>
-              <button className="btn danger" onClick={() => removePlace(p.place_id)}>
+              <button
+                className="btn danger"
+                onClick={() => removePlace(p.place_id)}
+                disabled={isEditing}
+              >
                 Remove
               </button>
             </div>
@@ -223,8 +378,16 @@ export default function Dashboard() {
 
   const next = nextCheckDate();
 
+  const dupCount = duplicates?.length ?? null;
+
   return (
     <div className="page">
+      <datalist id="category-suggestions-table">
+        {CATEGORIES.map((c) => (
+          <option key={c.value} value={c.value} />
+        ))}
+      </datalist>
+
       <div className="masthead">
         <h1>Dashboard</h1>
         <p>
@@ -261,6 +424,23 @@ export default function Dashboard() {
           <div className="bento-foot">most recent run</div>
         </div>
 
+        <div className={dupCount ? "bento-card accent-ruby" : "bento-card"}>
+          <div className="bento-kicker">Possible duplicates</div>
+          <div className="bento-value bento-value-sm">
+          {duplicates === null ? (loadingDup ? "…" : dupCount ?? "Click to scan") : dupCount}
+          </div>
+          <div className="bento-foot" style={{ marginTop: 8 }}>
+            <button
+              className="btn chip"
+              onClick={fetchDuplicates}
+              disabled={loadingDup}
+              type="button"
+            >
+              {loadingDup ? "Scanning..." : "Scan now"}
+            </button>
+          </div>
+        </div>
+
         <div className="bento-card">
           <div className="bento-kicker">Next auto-check</div>
           <div className="bento-value bento-value-sm">
@@ -273,6 +453,145 @@ export default function Dashboard() {
           </div>
           <div className="bento-foot">7:00 AM Phnom Penh · daily</div>
         </div>
+
+        {duplicates && duplicates.length > 0 && (
+          <div className="bento-card bento-card--wide dup-card accent-ruby">
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <div>
+              <h2 style={{ margin: "0 0 4px" }}>Possible duplicate place IDs</h2>
+              <p className="hint" style={{ margin: 0 }}>
+                These look like the same physical place tracked under multiple
+                Google IDs. Probed against Google right now — dead/
+                404'd IDs are flagged so you can keep the live one.
+              </p>
+            </div>
+            <button
+              className="btn"
+              onClick={fetchDuplicates}
+              disabled={loadingDup}
+              type="button"
+            >
+              {loadingDup ? "Rescanning..." : "Rescan"}
+            </button>
+          </div>
+          <div className="dup-list scroll-panel">
+            {duplicates.map((c, clusterIdx) => {
+              const chosenCanonical =
+                canonicalChoice[clusterIdx] || c.canonicalPlaceId;
+              const status = dupStatus[clusterIdx];
+              return (
+                <div className="dup-cluster" key={clusterIdx}>
+                  <div className="dup-head">
+                    <div className="dup-name">{c.sharedName}</div>
+                    <div className="dup-head-tags">
+                      <span className="badge dup-badge">{c.placeIds.length} IDs</span>
+                      {c.aliveCount > 0 && (
+                        <span className="badge dup-badge ok">
+                          {c.aliveCount} live
+                        </span>
+                      )}
+                      {c.deadCount > 0 && (
+                        <span className="badge dup-badge bad">
+                          {c.deadCount} stale
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="dup-rows">
+                    {c.rows.map((row) => {
+                      const probe = (c.probes || []).find(
+                        (p) => p.placeId === row.place_id
+                      );
+                      const isCanonical = chosenCanonical === row.place_id;
+                      const className = [
+                        "dup-row",
+                        probe?.alive === false ? "dead" : "",
+                        probe?.alive === true ? "alive" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ");
+                      return (
+                        <label className={className} key={row.place_id}>
+                          <input
+                            type="radio"
+                            name={`dup-cluster-${clusterIdx}`}
+                            checked={isCanonical}
+                            onChange={() =>
+                              setCanonicalChoice((prev) => ({
+                                ...prev,
+                                [clusterIdx]: row.place_id,
+                              }))
+                            }
+                          />
+                          <div className="dup-row-main">
+                            <div className="dup-row-name">
+                              {row.current_name || "(no name)"}
+                              {row.category && (
+                                <span className="badge" style={{ marginLeft: 10 }}>
+                                  {categoryLabel(row.category)}
+                                </span>
+                              )}
+                            </div>
+                            <div className="dup-row-meta">
+                              <code className="place-id" style={{ maxWidth: 340 }}>
+                                {row.place_id}
+                              </code>
+                              {row.label && (
+                                <>
+                                  {" · "}
+                                  <span className="addr">{row.label}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          <div className="dup-row-probe">
+                            {probe?.alive ? (
+                              <span className="probe ok">● live</span>
+                            ) : probe?.alive === false ? (
+                              <span
+                                className={`probe ${probe.notFound ? "bad" : "warn"}`}
+                              >
+                                {probe.notFound
+                                  ? "○ 404 / removed by Google"
+                                  : "○ probe failed"}
+                              </span>
+                            ) : (
+                              <span className="probe">◌ not probed</span>
+                            )}
+                            {isCanonical && c.canonicalPlaceId === row.place_id && (
+                              <span className="hint dup-suggest">· suggested</span>
+                            )}
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="dup-actions">
+                    <button
+                      className="btn primary"
+                      onClick={() => performMerge(clusterIdx)}
+                      disabled={status === "merging"}
+                      type="button"
+                    >
+                      {status === "merging"
+                        ? "Merging..."
+                        : `Keep ${chosenCanonical.slice(0, 14)}… and remove ${
+                            c.placeIds.length - 1
+                          }`}
+                    </button>
+                    <div className="dup-status">
+                      {typeof status === "string" && status !== "merging"
+                        ? status
+                        : null}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {duplicatesError && <p className="status">{duplicatesError}</p>}
+        </div>
+      )}
 
         <div className="bento-card bento-card--main">
           <div className="row" style={{ justifyContent: "space-between" }}>
