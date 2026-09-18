@@ -1,5 +1,6 @@
 import { supabase } from "../../../lib/supabase";
 import { guessCategoryFromPlace } from "../../../lib/categories";
+import { sendTelegramMessage, formatPlacesAdded } from "../../../lib/telegram";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -7,7 +8,7 @@ export default async function handler(req, res) {
     return res.status(405).end();
   }
 
-  const { places, category } = req.body || {};
+  const { places, category, source } = req.body || {};
   if (!Array.isArray(places) || places.length === 0) {
     return res.status(400).json({ error: "places (array) is required" });
   }
@@ -56,5 +57,15 @@ export default async function handler(req, res) {
   const { data, error } = await db.from("tracked_places").insert(rows).select();
 
   if (error) return res.status(500).json({ error: error.message });
-  return res.status(200).json({ added: data.length, skipped, places: data });
+
+  const telegram = await sendTelegramMessage(
+    formatPlacesAdded({
+      added: data.length,
+      skipped,
+      source: source ? String(source) : "bulk add",
+      names: data.map((p) => p.current_name || p.label || p.place_id),
+    })
+  );
+
+  return res.status(200).json({ added: data.length, skipped, places: data, telegram });
 }

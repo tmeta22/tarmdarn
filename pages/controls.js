@@ -89,6 +89,14 @@ const PLACE_ID_RE = /^[A-Za-z0-9_-]{10,}$/;
 // splits large inputs into batches of this size.
 const RESOLVE_BATCH = 100;
 
+/** Human-readable summary of a Telegram send result. */
+function describePush(result) {
+  if (!result) return "";
+  if (result.skipped) return "Telegram not configured.";
+  if (result.ok) return "Telegram notified.";
+  return "Telegram push failed.";
+}
+
 // ---------------------------------------------------------------------------
 // CSV column mapping
 //
@@ -308,6 +316,9 @@ export default function Controls() {
   // --- Check now ---
   const [checking, setChecking] = useState(false);
   const [checkStatus, setCheckStatus] = useState("");
+  const [testingPush, setTestingPush] = useState(false);
+  const [pushStatus, setPushStatus] = useState("");
+  const [resultsSource, setResultsSource] = useState("search");
 
   useEffect(() => {
     fetch("/api/places")
@@ -358,6 +369,7 @@ export default function Controls() {
     setSearching(true);
     setSearchStatus("");
     setResolveErrors([]);
+    setResultsSource("search");
     try {
       const res = await fetch("/api/places/search", {
         method: "POST",
@@ -394,6 +406,7 @@ export default function Controls() {
     if (!query.trim()) return;
     setScanning(true);
     setResolveErrors([]);
+    setResultsSource("scan all pages");
     setSearchStatus("Scanning every available page — this can take a few seconds...");
     try {
       const res = await fetch("/api/places/search", {
@@ -430,6 +443,7 @@ export default function Controls() {
     }
     setResolving(true);
     setResolveErrors([]);
+    setResultsSource(sourceLabel);
     setSearchStatus(`Resolving ${candidates.length} rows from ${sourceLabel}...`);
     try {
       const seen = new Set();
@@ -513,7 +527,7 @@ export default function Controls() {
     const res = await fetch("/api/places/bulk-add", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ places: rows, category: overrideCategory }),
+      body: JSON.stringify({ places: rows, category: overrideCategory, source: resultsSource }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -574,26 +588,48 @@ export default function Controls() {
     setChecking(true);
     setCheckStatus("Checking every tracked place against Google...");
     try {
-      const res = await fetch("/api/cron/check");
+      // The scheduled route is secret-gated, so manual runs use the
+      // user-facing equivalent instead of leaking CRON_SECRET to the client.
+      const res = await fetch("/api/places/check", { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Check failed");
-      const pushNote =
-        data.telegram && data.telegram.ok
-          ? " Telegram notified."
-          : data.telegram && data.telegram.skipped
-          ? ""
-          : data.telegram && data.telegram.error
-          ? " (Telegram push failed.)"
-          : "";
-      setCheckStatus(
-        `Checked ${data.checked}. ${data.changed} name${
-          data.changed === 1 ? "" : "s"
-        } changed.${pushNote}`
-      );
+
+      const parts = [
+        `Checked ${data.checked}.`,
+        `${data.changed} name${data.changed === 1 ? "" : "s"} changed.`,
+      ];
+      if (data.gone) parts.push(`${data.gone} no longer on Google.`);
+      if (data.failed) parts.push(`${data.failed} lookup${data.failed === 1 ? "" : "s"} failed.`);
+      parts.push(describePush(data.telegram));
+      setCheckStatus(parts.join(" "));
     } catch (err) {
       setCheckStatus(String(err.message || err));
     } finally {
       setChecking(false);
+    }
+  }
+
+  async function sendTestPush() {
+    setTestingPush(true);
+    setPushStatus("Sending test notification...");
+    try {
+      const res = await fetch("/api/telegram/test", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Test failed");
+
+      if (!data.configured) {
+        setPushStatus(
+          "Telegram isn't configured — set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID."
+        );
+      } else if (data.ok) {
+        setPushStatus("Test notification sent — check Telegram.");
+      } else {
+        setPushStatus(`Telegram rejected the message: ${data.error}`);
+      }
+    } catch (err) {
+      setPushStatus(String(err.message || err));
+    } finally {
+      setTestingPush(false);
     }
   }
 
@@ -1045,15 +1081,29 @@ export default function Controls() {
             Checks every tracked place against Google right now — the same
             thing the daily automatic check does.
           </p>
-          <button className="btn primary" onClick={runCheckNow} disabled={checking}>
-            <Icon name="refresh" />
-            {checking ? "Checking..." : "Check now"}
-          </button>
+          <div className="row">
+            <button className="btn primary" onClick={runCheckNow} disabled={checking}>
+              <Icon name="refresh" />
+              {checking ? "Checking..." : "Check now"}
+            </button>
+            <button
+              className={`btn icon-only${testingPush ? " loading" : ""}`}
+              onClick={sendTestPush}
+              disabled={testingPush}
+              type="button"
+              title="Send a test Telegram notification"
+              aria-label="Send a test Telegram notification"
+            >
+              <Icon name="send" />
+            </button>
+          </div>
           {checkStatus && <p className="status">{checkStatus}</p>}
+          {pushStatus && <p className="status">{pushStatus}</p>}
           <p className="hint" style={{ marginTop: 16, marginBottom: 0 }}>
             Automatic check runs daily at <strong>7:00 AM Phnom Penh time</strong> (00:00 UTC).
-            Set <code>TELEGRAM_BOT_TOKEN</code> / <code>TELEGRAM_CHAT_ID</code> to get a push
-            when it finishes.
+            Set <code>TELEGRAM_BOT_TOKEN</code> / <code>TELEGRAM_CHAT_ID</code> to receive a push
+            when a check finishes, when places are added, and when a duplicate scan finds
+            matching place IDs.
           </p>
         </div>
 

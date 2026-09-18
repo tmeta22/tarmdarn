@@ -1,5 +1,6 @@
 import { supabase } from "../../../lib/supabase";
 import { getPlaceName } from "../../../lib/places";
+import { sendTelegramMessage, formatDuplicatesFound } from "../../../lib/telegram";
 
 const PROBE_LIMIT = 3;
 
@@ -300,9 +301,16 @@ export default async function handler(req, res) {
     };
   });
 
+  // Only worth a push when the scan actually surfaced something to act on.
+  const telegram =
+    enriched.length > 0
+      ? await sendTelegramMessage(formatDuplicatesFound({ clusters: enriched }))
+      : null;
+
   return res.status(200).json({
     clusters: enriched,
     count: enriched.length,
     probedCount: toProbe.length,
+    telegram,
   });
 }

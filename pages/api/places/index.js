@@ -1,6 +1,7 @@
 import { supabase } from "../../../lib/supabase";
 import { getPlaceName } from "../../../lib/places";
 import { guessCategoryFromPlace } from "../../../lib/categories";
+import { sendTelegramMessage, formatPlacesAdded } from "../../../lib/telegram";
 
 export default async function handler(req, res) {
   const db = supabase();
@@ -54,7 +55,17 @@ export default async function handler(req, res) {
         .select()
         .single();
       if (error) return res.status(500).json({ error: error.message });
-      return res.status(200).json(data);
+
+      // Out-of-band confirmation that tracking started.
+      const telegram = await sendTelegramMessage(
+        formatPlacesAdded({
+          added: 1,
+          source: "manual add",
+          names: [data.current_name || data.label || data.place_id],
+        })
+      );
+
+      return res.status(200).json({ ...data, telegram });
     } catch (err) {
       return res.status(502).json({ error: String(err) });
     }
