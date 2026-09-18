@@ -47,6 +47,8 @@ export default async function handler(req, res) {
           category: finalCategory,
           label: label ?? null,
           current_name: details.name,
+          latitude: details.latitude ?? null,
+          longitude: details.longitude ?? null,
           last_checked_at: new Date().toISOString(),
         })
         .select()

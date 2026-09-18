@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { useRouter } from "next/router";
+import ThemeToggle from "./ThemeToggle";
 
 const LINKS = [
   {
@@ -8,6 +9,16 @@ const LINKS = [
     icon: (
       <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-4v-5h-4v5H4a1 1 0 0 1-1-1v-8.5Z" />
+      </svg>
+    ),
+  },
+  {
+    href: "/map",
+    label: "Map",
+    icon: (
+      <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M9.2 4.3 3.8 6.1a1 1 0 0 0-.7.95v12.1a1 1 0 0 0 1.3.95l4.8-1.6 5.6 1.9 4.4-1.8a1 1 0 0 0 .65-.95V5.55a1 1 0 0 0-1.3-.95l-4.75 1.6-5.6-1.9Z" />
+        <path d="M9.2 4.3v13.2M14.8 6.2v13.2" />
       </svg>
     ),
   },
@@ -32,18 +43,28 @@ export default function Nav() {
           <span className="brand-mark" aria-hidden="true">ត</span>
           <span>តាមដាន</span>
         </Link>
-        <nav className="topnav-links">
-          {LINKS.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`topnav-link${router.pathname === item.href ? " active" : ""}`}
-            >
-              {item.icon}
-              <span>{item.label}</span>
-            </Link>
-          ))}
-        </nav>
+        <div className="topnav-actions">
+          <nav className="topnav-links">
+            {LINKS.map((item) => {
+              const active =
+                item.href === "/"
+                  ? router.pathname === "/"
+                  : router.pathname.startsWith(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`topnav-link${active ? " active" : ""}`}
+                  title={item.label}
+                >
+                  {item.icon}
+                  <span className="topnav-label">{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+          <ThemeToggle />
+        </div>
       </div>
     </header>
   );

@@ -52,6 +52,8 @@ async function resolveOne(candidate) {
         address: details.address || address || null,
         primaryType: details.primaryType || null,
         types: Array.isArray(details.types) ? details.types : [],
+        latitude: details.latitude ?? null,
+        longitude: details.longitude ?? null,
       };
     } catch (err) {
       if (!name) throw err;
@@ -71,6 +73,8 @@ async function resolveOne(candidate) {
       address: top.address || address || null,
       primaryType: top.primaryType || null,
       types: Array.isArray(top.types) ? top.types : [],
+      latitude: top.latitude ?? null,
+      longitude: top.longitude ?? null,
     };
   }
 

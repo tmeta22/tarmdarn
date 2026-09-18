@@ -21,7 +21,7 @@ export default async function handler(req, res) {
 
   for (const place of places) {
     try {
-      const { name } = await getPlaceName(place.place_id);
+      const { name, latitude, longitude } = await getPlaceName(place.place_id);
       const changed = Boolean(name) && Boolean(place.current_name) && name !== place.current_name;
 
       if (changed) {
@@ -32,9 +32,17 @@ export default async function handler(req, res) {
         });
       }
 
+      const patch = { current_name: name, last_checked_at: new Date().toISOString() };
+      // Keep coordinates fresh, and fill them in for rows that predate the
+      // map view.
+      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        patch.latitude = latitude;
+        patch.longitude = longitude;
+      }
+
       await db
         .from("tracked_places")
-        .update({ current_name: name, last_checked_at: new Date().toISOString() })
+        .update(patch)
         .eq("place_id", place.place_id);
 
       results.push({

@@ -613,26 +613,33 @@ export default function Controls() {
                   Add selected
                 </button>
                 <button
-                  className="btn"
+                  className="btn icon-only"
                   onClick={addAllLoaded}
                   disabled={addableResultsCount === 0}
+                  title={`Add all ${addableResultsCount} new results`}
+                  aria-label={`Add all ${addableResultsCount} new results`}
                 >
                   <Icon name="listPlus" />
-                  Add all {addableResultsCount} new
                 </button>
                 {nextPageToken && (
                   <button
-                    className="btn"
+                    className={`btn icon-only${searching ? " loading" : ""}`}
                     onClick={() => runSearch(nextPageToken)}
                     disabled={searching || scanning || resolving}
+                    title="Load more results"
+                    aria-label="Load more results"
                   >
                     <Icon name="chevronDown" />
-                    {searching ? "Loading..." : "Load more results"}
                   </button>
                 )}
-                <button className="btn" onClick={runScanAll} disabled={searching || scanning || resolving}>
+                <button
+                  className={`btn icon-only${scanning ? " loading" : ""}`}
+                  onClick={runScanAll}
+                  disabled={searching || scanning || resolving}
+                  title="Scan all available pages"
+                  aria-label="Scan all available pages"
+                >
                   <Icon name="layers" />
-                  {scanning ? "Scanning..." : "Scan all pages"}
                 </button>
               </div>
               {resolveErrors.length > 0 && (
@@ -701,40 +708,47 @@ export default function Controls() {
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Paste lines</h3>
               <div className="row" style={{ gap: 6 }}>
                 <button
-                  className={`btn chip${scanMode === "name" ? " active" : ""}`}
+                  className={`btn chip icon-only${scanMode === "name" ? " active" : ""}`}
                   onClick={() => setScanMode("name")}
                   type="button"
+                  title="Scan by name"
+                  aria-label="Scan by name"
+                  aria-pressed={scanMode === "name"}
                 >
                   <Icon name="user" />
-                  By name
                 </button>
                 <button
-                  className={`btn chip${scanMode === "placeid" ? " active" : ""}`}
+                  className={`btn chip icon-only${scanMode === "placeid" ? " active" : ""}`}
                   onClick={() => setScanMode("placeid")}
                   type="button"
+                  title="Scan by place_id"
+                  aria-label="Scan by place_id"
+                  aria-pressed={scanMode === "placeid"}
                 >
                   <Icon name="badge" />
-                  By place_id
                 </button>
                 <button
-                  className={`btn chip${scanMode === "both" ? " active" : ""}`}
+                  className={`btn chip icon-only${scanMode === "both" ? " active" : ""}`}
                   onClick={() => setScanMode("both")}
                   type="button"
+                  title="Scan by name and place_id"
+                  aria-label="Scan by name and place_id"
+                  aria-pressed={scanMode === "both"}
                 >
                   <Icon name="split" />
-                  By both
                 </button>
                 <button
-                  className="btn chip ghost"
+                  className="btn chip icon-only ghost"
                   onClick={() => {
                     const detected = guessScanModeFor(scanText);
                     if (detected) setScanMode(detected);
                   }}
                   type="button"
                   disabled={!parseScanLines(scanText).length}
+                  title="Detect the mode from the pasted rows"
+                  aria-label="Detect scan mode automatically"
                 >
                   <Icon name="sparkle" />
-                  Auto mode
                 </button>
               </div>
             </div>
@@ -768,13 +782,14 @@ export default function Controls() {
                 {resolving ? "Resolving..." : `Resolve ${lineCount} row${lineCount === 1 ? "" : "s"}`}
               </button>
               <button
-                className="btn"
+                className="btn icon-only"
                 onClick={() => setScanText("")}
                 disabled={!scanText}
                 type="button"
+                title="Clear the pasted rows"
+                aria-label="Clear the pasted rows"
               >
                 <Icon name="eraser" />
-                Clear
               </button>
             </div>
           </div>
@@ -835,23 +850,45 @@ export default function Controls() {
         <div className="bento-card bento-card--wide">
           <h2>Export</h2>
           <p className="hint">Download your tracked places or the full rename history.</p>
-          <div className="row">
-            <a className="btn" href="/api/places/export?type=places&format=csv">
-              <Icon name="download" />
-              Places · CSV
-            </a>
-            <a className="btn" href="/api/places/export?type=places&format=json">
-              <Icon name="download" />
-              Places · JSON
-            </a>
-            <a className="btn" href="/api/places/export?type=history&format=csv">
-              <Icon name="download" />
-              History · CSV
-            </a>
-            <a className="btn" href="/api/places/export?type=history&format=json">
-              <Icon name="download" />
-              History · JSON
-            </a>
+          <div className="export-groups">
+            <div className="export-group">
+              <span className="export-label">Places</span>
+              <a
+                className="btn"
+                href="/api/places/export?type=places&format=csv"
+                title="Export tracked places as CSV"
+              >
+                <Icon name="download" />
+                CSV
+              </a>
+              <a
+                className="btn"
+                href="/api/places/export?type=places&format=json"
+                title="Export tracked places as JSON"
+              >
+                <Icon name="download" />
+                JSON
+              </a>
+            </div>
+            <div className="export-group">
+              <span className="export-label">History</span>
+              <a
+                className="btn"
+                href="/api/places/export?type=history&format=csv"
+                title="Export rename history as CSV"
+              >
+                <Icon name="download" />
+                CSV
+              </a>
+              <a
+                className="btn"
+                href="/api/places/export?type=history&format=json"
+                title="Export rename history as JSON"
+              >
+                <Icon name="download" />
+                JSON
+              </a>
+            </div>
           </div>
         </div>
       </div>

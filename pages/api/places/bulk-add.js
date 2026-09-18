@@ -47,6 +47,8 @@ export default async function handler(req, res) {
       category: rowCategory,
       label: p.label || p.address || null,
       current_name: p.name ?? null,
+      latitude: Number.isFinite(p.latitude) ? p.latitude : null,
+      longitude: Number.isFinite(p.longitude) ? p.longitude : null,
       last_checked_at: new Date().toISOString(),
     };
   });

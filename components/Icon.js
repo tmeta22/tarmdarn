@@ -130,6 +130,85 @@ const PATHS = {
       <path d="M12 16.2v.3" />
     </>
   ),
+
+  /* --- Theme --- */
+  sun: (
+    <>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4 5.2 18.8" />
+    </>
+  ),
+  moon: <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" />,
+  monitor: (
+    <>
+      <rect x="2.5" y="4" width="19" height="13" rx="2.5" />
+      <path d="M8.5 20.5h7M12 17v3.5" />
+    </>
+  ),
+
+  /* --- View modes --- */
+  viewTable: (
+    <>
+      <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+      <path d="M3 9.5h18M9 9.5v10" />
+    </>
+  ),
+  viewGrid: (
+    <>
+      <rect x="3.5" y="3.5" width="7.5" height="7.5" rx="2" />
+      <rect x="13" y="3.5" width="7.5" height="7.5" rx="2" />
+      <rect x="3.5" y="13" width="7.5" height="7.5" rx="2" />
+      <rect x="13" y="13" width="7.5" height="7.5" rx="2" />
+    </>
+  ),
+  viewTiles: (
+    <>
+      <rect x="3.5" y="3.5" width="5" height="5" rx="1.6" />
+      <rect x="9.5" y="3.5" width="5" height="5" rx="1.6" />
+      <rect x="15.5" y="3.5" width="5" height="5" rx="1.6" />
+      <rect x="3.5" y="9.5" width="5" height="5" rx="1.6" />
+      <rect x="9.5" y="9.5" width="5" height="5" rx="1.6" />
+      <rect x="15.5" y="9.5" width="5" height="5" rx="1.6" />
+      <rect x="3.5" y="15.5" width="5" height="5" rx="1.6" />
+      <rect x="9.5" y="15.5" width="5" height="5" rx="1.6" />
+      <rect x="15.5" y="15.5" width="5" height="5" rx="1.6" />
+    </>
+  ),
+
+  /* --- Map --- */
+  map: (
+    <>
+      <path d="M9.2 4.3 3.8 6.1a1 1 0 0 0-.7.95v12.1a1 1 0 0 0 1.3.95l4.8-1.6 5.6 1.9 4.4-1.8a1 1 0 0 0 .65-.95V5.55a1 1 0 0 0-1.3-.95l-4.75 1.6-5.6-1.9Z" />
+      <path d="M9.2 4.3v13.2M14.8 6.2v13.2" />
+    </>
+  ),
+  mapPin: (
+    <>
+      <path d="M12 21c4-4.2 6-7.4 6-10.2A6 6 0 0 0 6 10.8C6 13.6 8 16.8 12 21Z" />
+      <circle cx="12" cy="10.6" r="2.3" />
+    </>
+  ),
+  crosshair: (
+    <>
+      <circle cx="12" cy="12" r="7" />
+      <path d="M12 2.5v3.2M12 18.3v3.2M2.5 12h3.2M18.3 12h3.2" />
+    </>
+  ),
+  externalLink: (
+    <>
+      <path d="M14 4.5h5.5V10" />
+      <path d="M19.5 4.5 12 12" />
+      <path d="M18 14.5v4a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6h4" />
+    </>
+  ),
+
+  /* --- Misc --- */
+  copy: (
+    <>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+    </>
+  ),
 };
 
 export default function Icon({ name }) {

@@ -17,6 +17,7 @@ function CopyButton({ text }) {
     <button
       className={`copy-btn${copied ? " copied" : ""}`}
       title="Copy place_id"
+      aria-label={`Copy place_id ${text}`}
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text);
@@ -77,6 +78,18 @@ export default function Dashboard() {
   const [filterCategory, setFilterCategory] = useState("all");
   const [sortBy, setSortBy] = useState("name_asc");
   const [groupByCategory, setGroupByCategory] = useState(false);
+  const [view, setView] = useState("table");
+
+  // Restore the last view mode, then keep it in sync as it changes.
+  useEffect(() => {
+    const saved = window.localStorage.getItem("taamdan-view");
+    if (saved === "table" || saved === "grid" || saved === "tile") setView(saved);
+  }, []);
+
+  function changeView(next) {
+    setView(next);
+    window.localStorage.setItem("taamdan-view", next);
+  }
 
   async function loadPlaces() {
     setLoadingPlaces(true);
@@ -262,6 +275,92 @@ export default function Dashboard() {
     }
   }
 
+  // Icon-only so the row/card stays compact; the label lives in the
+  // tooltip and the accessible name.
+  function renderActions(p) {
+    const isEditing = editing?.placeId === p.place_id;
+    const editStatusFor = editStatus[p.place_id];
+    const name = p.current_name || p.place_id;
+    return (
+      <>
+        {isEditing ? (
+          <>
+            <button
+              className="btn primary"
+              disabled={editStatusFor === "saving"}
+              onClick={() => saveEditing(p.place_id)}
+            >
+              <Icon name="check" />
+              {editStatusFor === "saving" ? "Saving..." : "Save"}
+            </button>
+            <button
+              className="btn icon-only"
+              disabled={editStatusFor === "saving"}
+              onClick={cancelEditing}
+              title="Cancel"
+              aria-label="Cancel editing"
+            >
+              <Icon name="close" />
+            </button>
+          </>
+        ) : (
+          <button
+            className="btn icon-only"
+            onClick={() => startEditing(p)}
+            title="Edit category / note"
+            aria-label={`Edit ${name}`}
+          >
+            <Icon name="edit" />
+          </button>
+        )}
+        <button
+          className="btn icon-only"
+          onClick={() => toggleHistory(p.place_id)}
+          title="Rename history"
+          aria-label={`Rename history for ${name}`}
+          aria-expanded={openHistoryFor === p.place_id}
+        >
+          <Icon name="history" />
+        </button>
+        <button
+          className="btn danger icon-only"
+          onClick={() => removePlace(p.place_id)}
+          disabled={isEditing}
+          title="Stop tracking"
+          aria-label={`Stop tracking ${name}`}
+        >
+          <Icon name="trash" />
+        </button>
+      </>
+    );
+  }
+
+  function renderHistory(placeId) {
+    if (openHistoryFor !== placeId) return null;
+    const hist = historyByPlace[placeId];
+    return (
+      <div className="history">
+        {!hist ? (
+          "Loading..."
+        ) : hist.length === 0 ? (
+          "No renames recorded yet."
+        ) : (
+          hist.map((h) => (
+            <div className="change" key={h.id}>
+              <span className="arrow-line">
+                {h.old_name}
+                <Icon name="arrow" />
+                {h.new_name}
+              </span>
+              <br />
+              {new Date(h.changed_at).toLocaleString()}
+            </div>
+          ))
+        )}
+      </div>
+    );
+  }
+
   function renderPlaceRow(p) {
     const hist = historyByPlace[p.place_id];
     const wasRenamed = hist && hist.length > 0;
@@ -327,69 +426,82 @@ export default function Dashboard() {
             {p.last_checked_at ? new Date(p.last_checked_at).toLocaleString() : "never"}
           </td>
           <td>
-            <div className="row row-actions">
-              {isEditing ? (
-                <>
-                  <button
-                    className="btn primary"
-                    disabled={editStatusFor === "saving"}
-                    onClick={() => saveEditing(p.place_id)}
-                  >
-                    <Icon name="check" />
-                    {editStatusFor === "saving" ? "Saving..." : "Save"}
-                  </button>
-                  <button className="btn" disabled={editStatusFor === "saving"} onClick={cancelEditing}>
-                    <Icon name="close" />
-                    Cancel
-                  </button>
-                </>
-              ) : (
-                <button className="btn" onClick={() => startEditing(p)}>
-                  <Icon name="edit" />
-                  Edit
-                </button>
-              )}
-              <button className="btn" onClick={() => toggleHistory(p.place_id)}>
-                <Icon name="history" />
-                History
-              </button>
-              <button
-                className="btn danger"
-                onClick={() => removePlace(p.place_id)}
-                disabled={isEditing}
-              >
-                <Icon name="trash" />
-                Remove
-              </button>
-            </div>
+            <div className="row row-actions">{renderActions(p)}</div>
           </td>
         </tr>
         {openHistoryFor === p.place_id && (
           <tr>
-            <td colSpan={5}>
-              <div className="history">
-                {!hist ? (
-                  "Loading..."
-                ) : hist.length === 0 ? (
-                  "No renames recorded yet."
-                ) : (
-                  hist.map((h) => (
-                    <div className="change" key={h.id}>
-                      <span className="arrow-line">
-                        {h.old_name}
-                        <Icon name="arrow" />
-                        {h.new_name}
-                      </span>
-                      <br />
-                      {new Date(h.changed_at).toLocaleString()}
-                    </div>
-                  ))
-                )}
-              </div>
-            </td>
+            <td colSpan={5}>{renderHistory(p.place_id)}</td>
           </tr>
         )}
       </Fragment>
+    );
+  }
+
+  function renderPlaceCard(p) {
+    const hist = historyByPlace[p.place_id];
+    const wasRenamed = hist && hist.length > 0;
+    const isEditing = editing?.placeId === p.place_id;
+    const editStatusFor = editStatus[p.place_id];
+
+    return (
+      <div className={`pcard${isEditing ? " editing" : ""}`} key={p.place_id}>
+        <div className="pcard-head">
+          <span className="pcard-title">{p.current_name || "(unknown)"}</span>
+          {isEditing ? (
+            <input
+              className="inline-input cat-edit"
+              list="category-suggestions-table"
+              type="text"
+              placeholder="Category"
+              value={editing.category}
+              onChange={(e) => setEditing({ ...editing, category: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveEditing(p.place_id);
+                if (e.key === "Escape") cancelEditing();
+              }}
+            />
+          ) : (
+            <span
+              className={`badge ${wasRenamed ? "renamed" : ""}${
+                !p.category ? " uncategorized" : ""
+              }`}
+            >
+              {categoryLabel(p.category)}
+            </span>
+          )}
+        </div>
+
+        {isEditing ? (
+          <input
+            className="inline-input"
+            type="text"
+            placeholder="Note / address"
+            value={editing.label}
+            onChange={(e) => setEditing({ ...editing, label: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveEditing(p.place_id);
+              if (e.key === "Escape") cancelEditing();
+            }}
+          />
+        ) : p.label ? (
+          <span className="pcard-label">{p.label}</span>
+        ) : null}
+
+        <div className="place-id-cell">
+          <code className="place-id pcard-id">{p.place_id}</code>
+          <CopyButton text={p.place_id} />
+        </div>
+
+        {editStatusFor && editStatusFor !== "saving" && editStatusFor !== "saved" && (
+          <div className="inline-err">{editStatusFor}</div>
+        )}
+        {editStatusFor === "saved" && <div className="inline-ok">Saved</div>}
+
+        <div className="pcard-actions">{renderActions(p)}</div>
+
+        {renderHistory(p.place_id)}
+      </div>
     );
   }
 
@@ -460,13 +572,14 @@ export default function Dashboard() {
           </div>
           <div className="bento-foot" style={{ marginTop: 8 }}>
             <button
-              className="btn chip"
+              className={`btn icon-only${loadingDup ? " loading" : ""}`}
               onClick={fetchDuplicates}
               disabled={loadingDup}
               type="button"
+              title="Scan for duplicate place IDs"
+              aria-label="Scan for duplicate place IDs"
             >
               <Icon name="refresh" />
-              {loadingDup ? "Scanning..." : "Scan now"}
             </button>
           </div>
         </div>
@@ -499,13 +612,14 @@ export default function Dashboard() {
               </p>
             </div>
             <button
-              className="btn"
+              className={`btn icon-only${loadingDup ? " loading" : ""}`}
               onClick={fetchDuplicates}
               disabled={loadingDup}
               type="button"
+              title="Rescan duplicate place IDs"
+              aria-label="Rescan duplicate place IDs"
             >
               <Icon name="refresh" />
-              {loadingDup ? "Rescanning..." : "Rescan"}
             </button>
           </div>
           <div className="dup-list scroll-panel">
@@ -644,6 +758,38 @@ export default function Dashboard() {
             <h2 style={{ margin: 0 }}>
               Tracked places ({visiblePlaces.length} of {places.length})
             </h2>
+            <div className="view-switch" role="group" aria-label="View mode">
+              <button
+                type="button"
+                className={view === "table" ? "active" : ""}
+                onClick={() => changeView("table")}
+                title="Table view"
+                aria-label="Table view"
+                aria-pressed={view === "table"}
+              >
+                <Icon name="viewTable" />
+              </button>
+              <button
+                type="button"
+                className={view === "grid" ? "active" : ""}
+                onClick={() => changeView("grid")}
+                title="Grid view"
+                aria-label="Grid view"
+                aria-pressed={view === "grid"}
+              >
+                <Icon name="viewGrid" />
+              </button>
+              <button
+                type="button"
+                className={view === "tile" ? "active" : ""}
+                onClick={() => changeView("tile")}
+                title="Tile view"
+                aria-label="Tile view"
+                aria-pressed={view === "tile"}
+              >
+                <Icon name="viewTiles" />
+              </button>
+            </div>
           </div>
 
           <div className="toolbar">
@@ -688,7 +834,7 @@ export default function Dashboard() {
             </p>
           ) : visiblePlaces.length === 0 ? (
             <p className="empty">No tracked places match that filter.</p>
-          ) : (
+          ) : view === "table" ? (
             <div className="scroll-panel table-scroll">
               <table>
                 <thead>
@@ -716,6 +862,17 @@ export default function Dashboard() {
                 </tbody>
               </table>
             </div>
+          ) : groupedPlaces ? (
+            groupedPlaces.map(([groupName, groupPlaces]) => (
+              <div className="place-group" key={groupName}>
+                <div className="group-heading">
+                  {groupName} · {groupPlaces.length}
+                </div>
+                <div className={`place-cards ${view}`}>{groupPlaces.map(renderPlaceCard)}</div>
+              </div>
+            ))
+          ) : (
+            <div className={`place-cards ${view}`}>{visiblePlaces.map(renderPlaceCard)}</div>
           )}
         </div>
 
