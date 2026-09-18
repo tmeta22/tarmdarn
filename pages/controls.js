@@ -5,9 +5,11 @@ import Icon from "../components/Icon";
 // ---------------------------------------------------------------------------
 // Lightweight CSV parser (RFC 4180-ish, no deps).
 // Handles CR/LF/CRLF line endings, quoted fields, escaped "".
+// Returns the raw cell grid — deciding which row is a header, and which
+// column means what, is up to the caller.
 // ---------------------------------------------------------------------------
 function parseCSV(text) {
-  if (!text) return { header: [], rows: [] };
+  if (!text) return { table: [] };
   // Strip a possible UTF-8 BOM
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
 
@@ -71,83 +73,151 @@ function parseCSV(text) {
     rows.push(row);
   }
 
-  const [rawHeader, ...dataRows] = rows;
-  const header = (rawHeader || []).map((h) => (h || "").trim());
   return {
-    header,
-    rows: dataRows
+    table: rows
       .filter((r) => r.some((v) => (v || "").trim() !== ""))
-      .map((r) => {
-        const obj = {};
-        for (let k = 0; k < header.length; k++) {
-          const key = header[k] || String(k);
-          obj[key] = (r[k] ?? "").trim();
-        }
-        return obj;
-      }),
+      .map((r) => r.map((v) => (v ?? "").trim())),
   };
-}
-
-function pick(row, keys) {
-  for (const k of keys) {
-    if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== "") {
-      return String(row[k]).trim();
-    }
-  }
-  return "";
-}
-
-function rowsToCandidates(rawRows) {
-  // Accept the app's own export CSV (place_id, label, category, current_name)
-  // as well as generic uploads with flexible header names.
-  const out = [];
-  for (const row of rawRows) {
-    const placeId = pick(row, [
-      "place_id",
-      "placeId",
-      "Place ID",
-      "place id",
-      "google_place_id",
-      "id",
-    ]);
-    const name = pick(row, [
-      "name",
-      "current_name",
-      "place name",
-      "Place Name",
-      "title",
-      "displayName",
-    ]);
-    const label = pick(row, [
-      "label",
-      "address",
-      "note",
-      "notes",
-      "Address",
-      "location",
-    ]);
-    const category = pick(row, [
-      "category",
-      "Category",
-      "type",
-      "group",
-    ]);
-    if (!placeId && !name) continue;
-    out.push({
-      placeId,
-      name,
-      address: label,
-      label,
-      category: category || null,
-    });
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------------------
 // Scan textarea parsers: lines -> candidate rows
 // ---------------------------------------------------------------------------
 const PLACE_ID_RE = /^[A-Za-z0-9_-]{10,}$/;
+
+// ---------------------------------------------------------------------------
+// CSV column mapping
+//
+// Headers are treated as a hint, never a requirement: any file can be
+// imported by picking columns by hand, and the guesses below just save
+// clicks for the common shapes.
+// ---------------------------------------------------------------------------
+const CSV_FIELDS = [
+  { key: "placeId", label: "Place ID" },
+  { key: "name", label: "Name" },
+  { key: "label", label: "Note / address" },
+  { key: "category", label: "Category" },
+];
+
+const HEADER_HINTS = {
+  placeId: ["place_id", "placeid", "place id", "google_place_id", "googleplaceid", "id", "gid", "cid"],
+  name: [
+    "name",
+    "current_name",
+    "currentname",
+    "place_name",
+    "placename",
+    "place name",
+    "title",
+    "displayname",
+    "display_name",
+    "display name",
+    "school",
+  ],
+  label: [
+    "label",
+    "address",
+    "formatted_address",
+    "formattedaddress",
+    "addr",
+    "note",
+    "notes",
+    "location",
+    "description",
+  ],
+  category: ["category", "type", "types", "group", "kind", "tag"],
+};
+
+function normalizeHeader(h) {
+  return String(h || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+/** Column names for the mapping UI: real headers, or positional placeholders. */
+function csvColumnNames(csv, hasHeader) {
+  const first = (csv && csv.table[0]) || [];
+  return first.map((cell, index) => {
+    if (!hasHeader) return { index, name: `Column ${index + 1}` };
+    const label = String(cell || "").trim();
+    return { index, name: label || `Column ${index + 1}` };
+  });
+}
+
+/**
+ * Best-effort mapping so a file with recognisable headers needs no clicks.
+ * Falls back to sniffing the first data row, which is what makes headerless
+ * files workable.
+ */
+function guessCsvMapping(csv, hasHeader) {
+  const map = { placeId: "", name: "", label: "", category: "" };
+  const columns = csvColumnNames(csv, hasHeader);
+  const dataRows = hasHeader ? csv.table.slice(1) : csv.table;
+  const firstRow = dataRows[0] || [];
+  const taken = new Set();
+
+  // 1. Recognised header names win.
+  const normalized = columns.map((c) => normalizeHeader(c.name));
+  for (const { key } of CSV_FIELDS) {
+    const hints = HEADER_HINTS[key];
+    const idx = normalized.findIndex((n, i) => !taken.has(i) && hints.includes(n));
+    if (idx !== -1) {
+      map[key] = idx;
+      taken.add(idx);
+    }
+  }
+
+  // 2. Otherwise look at the data: a place_id-shaped cell identifies that column.
+  if (map.placeId === "") {
+    const idx = firstRow.findIndex(
+      (v, i) => !taken.has(i) && PLACE_ID_RE.test(String(v || "").trim())
+    );
+    if (idx !== -1) {
+      map.placeId = idx;
+      taken.add(idx);
+    }
+  }
+
+  // 3. And the first remaining text column is the most likely name.
+  if (map.name === "") {
+    const idx = firstRow.findIndex((v, i) => {
+      if (taken.has(i)) return false;
+      const s = String(v || "").trim();
+      return s !== "" && !PLACE_ID_RE.test(s);
+    });
+    if (idx !== -1) {
+      map.name = idx;
+      taken.add(idx);
+    }
+  }
+
+  return map;
+}
+
+/** The data rows for a parsed CSV, honouring the header toggle. */
+function csvDataRows(csv, hasHeader) {
+  if (!csv) return [];
+  return hasHeader ? csv.table.slice(1) : csv.table;
+}
+
+/** Turn mapped rows into the candidate shape /api/places/resolve expects. */
+function csvCandidates(csv, hasHeader, map) {
+  const at = (row, index) =>
+    index === "" || index === null || index === undefined
+      ? ""
+      : String(row[index] ?? "").trim();
+
+  return csvDataRows(csv, hasHeader)
+    .map((row) => {
+      const placeId = at(row, map.placeId);
+      const name = at(row, map.name);
+      const label = at(row, map.label);
+      const category = at(row, map.category);
+      return { placeId, name, address: label, label, category: category || null };
+    })
+    .filter((c) => c.placeId || c.name);
+}
 
 function parseScanLines(text) {
   return (text || "")
@@ -220,6 +290,11 @@ export default function Controls() {
   const [resolveErrors, setResolveErrors] = useState([]);
   const csvInputRef = useRef(null);
 
+  // --- CSV import: parsed file + how its columns map onto our fields ---
+  const [csv, setCsv] = useState(null); // { fileName, table }
+  const [csvHasHeader, setCsvHasHeader] = useState(true);
+  const [csvMap, setCsvMap] = useState({ placeId: "", name: "", label: "", category: "" });
+
   // --- Add by ID ---
   const [manualId, setManualId] = useState("");
   const [manualLabel, setManualLabel] = useState("");
@@ -235,6 +310,17 @@ export default function Controls() {
       .then((r) => r.json())
       .then((data) => setPlaces(Array.isArray(data) ? data : []));
   }, []);
+
+  // Re-guess which column is which whenever the file or the header
+  // toggle changes. The user can override any of it afterwards.
+  useEffect(() => {
+    if (!csv) return;
+    setCsvMap(guessCsvMapping(csv, csvHasHeader));
+  }, [csv, csvHasHeader]);
+
+  const csvColumns = useMemo(() => csvColumnNames(csv, csvHasHeader), [csv, csvHasHeader]);
+  const csvRows = useMemo(() => csvDataRows(csv, csvHasHeader), [csv, csvHasHeader]);
+  const csvMappingUsable = csvMap.placeId !== "" || csvMap.name !== "";
 
   const trackedIds = new Set(places.map((p) => p.place_id));
 
@@ -500,21 +586,30 @@ export default function Controls() {
     setSearchStatus(`Reading ${file.name}...`);
     try {
       const text = await file.text();
-      const { header, rows } = parseCSV(text);
-      const candidates = rowsToCandidates(rows);
-      if (candidates.length === 0) {
-        setSearchStatus(
-          `No usable rows found in ${file.name}. Headers found: ${
-            header.length ? header.join(", ") : "(none)"
-          }. Need at least a place_id or name column.`
-        );
+      const { table } = parseCSV(text);
+      if (table.length === 0) {
+        setSearchStatus(`${file.name} has no rows.`);
         return;
       }
-      setSearchStatus(`Parsed ${candidates.length} rows. Resolving...`);
-      await runResolve(candidates, `CSV (${file.name})`);
+      setCsv({ fileName: file.name, table });
+      setCsvHasHeader(true);
+      // The panel below reports the row/column counts, so clear the
+      // transient "Reading..." message rather than leaving it stale.
+      setSearchStatus("");
     } catch (err) {
       setSearchStatus(`CSV read failed: ${err.message || err}`);
     }
+  }
+
+  function resolveCsv() {
+    const candidates = csvCandidates(csv, csvHasHeader, csvMap);
+    if (candidates.length === 0) {
+      setSearchStatus(
+        "No usable rows with the current column mapping — map a Place ID or Name column that has values."
+      );
+      return;
+    }
+    runResolve(candidates, `CSV (${csv.fileName})`);
   }
 
   const addableResultsCount = results.filter((r) => !trackedIds.has(r.placeId)).length;
@@ -676,9 +771,7 @@ export default function Controls() {
             <div className="row" style={{ justifyContent: "space-between" }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>CSV upload</h3>
               <span className="hint" style={{ fontSize: 12, margin: 0 }}>
-                Export format: columns <code>place_id</code>, <code>name</code> /{" "}
-                <code>current_name</code>, <code>label</code> / <code>address</code>,{" "}
-                <code>category</code>
+                Any column layout — pick which column is which after uploading.
               </span>
             </div>
             <label className="file-drop" style={{ marginTop: 10 }}>
@@ -686,9 +779,11 @@ export default function Controls() {
                 <Icon name="upload" />
               </span>
               <span>
-                <span className="file-drop-strong">Choose a CSV file</span>
+                <span className="file-drop-strong">
+                  {csv ? "Choose a different CSV file" : "Choose a CSV file"}
+                </span>
                 <br />
-                place_id and/or name columns — resolved against Google after upload.
+                Columns are detected automatically and can be remapped before resolving.
               </span>
               <input
                 type="file"
@@ -701,6 +796,104 @@ export default function Controls() {
                 }}
               />
             </label>
+
+            {csv && (
+              <div className="csv-map">
+                <div className="csv-map-head">
+                  <span className="csv-file-name">
+                    {csv.fileName}
+                    <span className="csv-file-meta">
+                      {csvRows.length} row{csvRows.length === 1 ? "" : "s"} ·{" "}
+                      {csvColumns.length} column{csvColumns.length === 1 ? "" : "s"}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    className="btn icon-only"
+                    onClick={() => {
+                      setCsv(null);
+                      setSearchStatus("");
+                    }}
+                    title="Discard this CSV"
+                    aria-label="Discard this CSV"
+                  >
+                    <Icon name="close" />
+                  </button>
+                </div>
+
+                <div className="csv-map-grid">
+                  {CSV_FIELDS.map((field) => (
+                    <label key={field.key} className="csv-map-field">
+                      <span className="csv-map-label">{field.label}</span>
+                      <select
+                        value={csvMap[field.key] === "" ? "" : String(csvMap[field.key])}
+                        onChange={(e) =>
+                          setCsvMap((m) => ({
+                            ...m,
+                            [field.key]: e.target.value === "" ? "" : Number(e.target.value),
+                          }))
+                        }
+                      >
+                        <option value="">— not mapped —</option>
+                        {csvColumns.map((c) => (
+                          <option key={c.index} value={String(c.index)}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={csvHasHeader}
+                    onChange={(e) => setCsvHasHeader(e.target.checked)}
+                  />
+                  First row is a header
+                </label>
+
+                {csvRows.length > 0 && (
+                  <div className="csv-preview scroll-panel">
+                    <table>
+                      <thead>
+                        <tr>
+                          {csvColumns.map((c) => (
+                            <th key={c.index}>{c.name}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {csvRows.slice(0, 3).map((row, i) => (
+                          <tr key={i}>
+                            {csvColumns.map((c) => (
+                              <td key={c.index}>{row[c.index] ?? ""}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div className="row">
+                  <button
+                    className="btn primary"
+                    onClick={resolveCsv}
+                    disabled={resolving || !csvMappingUsable}
+                  >
+                    <Icon name="play" />
+                    {resolving
+                      ? "Resolving..."
+                      : `Resolve ${csvRows.length} row${csvRows.length === 1 ? "" : "s"}`}
+                  </button>
+                  {!csvMappingUsable && (
+                    <span className="inline-err">Map a Place ID or Name column first.</span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="card-block">
