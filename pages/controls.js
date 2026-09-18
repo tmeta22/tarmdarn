@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORIES, guessCategoryFromPlace } from "../lib/categories";
+import Icon from "../components/Icon";
 
 // ---------------------------------------------------------------------------
 // Lightweight CSV parser (RFC 4180-ish, no deps).
@@ -567,6 +568,7 @@ export default function Controls() {
               onChange={(e) => setSearchCategory(e.target.value)}
             />
             <button className="btn primary" type="submit" disabled={searching || scanning || resolving}>
+              <Icon name="search" />
               {searching ? "Searching..." : "Search"}
             </button>
           </form>
@@ -607,6 +609,7 @@ export default function Controls() {
               </div>
               <div className="row" style={{ marginTop: 14 }}>
                 <button className="btn primary" onClick={addSelected} disabled={addableResultsCount === 0}>
+                  <Icon name="checkSquare" />
                   Add selected
                 </button>
                 <button
@@ -614,6 +617,7 @@ export default function Controls() {
                   onClick={addAllLoaded}
                   disabled={addableResultsCount === 0}
                 >
+                  <Icon name="listPlus" />
                   Add all {addableResultsCount} new
                 </button>
                 {nextPageToken && (
@@ -622,16 +626,19 @@ export default function Controls() {
                     onClick={() => runSearch(nextPageToken)}
                     disabled={searching || scanning || resolving}
                   >
+                    <Icon name="chevronDown" />
                     {searching ? "Loading..." : "Load more results"}
                   </button>
                 )}
                 <button className="btn" onClick={runScanAll} disabled={searching || scanning || resolving}>
+                  <Icon name="layers" />
                   {scanning ? "Scanning..." : "Scan all pages"}
                 </button>
               </div>
               {resolveErrors.length > 0 && (
                 <div className="resolve-errors scroll-panel">
                   <div className="resolve-errors-head">
+                    <Icon name="alert" />
                     Failed to resolve {resolveErrors.length} row
                     {resolveErrors.length === 1 ? "" : "s"}:
                   </div>
@@ -667,7 +674,15 @@ export default function Controls() {
                 <code>category</code>
               </span>
             </div>
-            <div className="row" style={{ marginTop: 10 }}>
+            <label className="file-drop" style={{ marginTop: 10 }}>
+              <span className="file-drop-icon">
+                <Icon name="upload" />
+              </span>
+              <span>
+                <span className="file-drop-strong">Choose a CSV file</span>
+                <br />
+                place_id and/or name columns — resolved against Google after upload.
+              </span>
               <input
                 type="file"
                 accept=".csv,text/csv"
@@ -677,9 +692,8 @@ export default function Controls() {
                   handleCSVFile(f);
                   if (csvInputRef.current) csvInputRef.current.value = "";
                 }}
-                style={{ fontSize: 13 }}
               />
-            </div>
+            </label>
           </div>
 
           <div className="card-block">
@@ -691,6 +705,7 @@ export default function Controls() {
                   onClick={() => setScanMode("name")}
                   type="button"
                 >
+                  <Icon name="user" />
                   By name
                 </button>
                 <button
@@ -698,6 +713,7 @@ export default function Controls() {
                   onClick={() => setScanMode("placeid")}
                   type="button"
                 >
+                  <Icon name="badge" />
                   By place_id
                 </button>
                 <button
@@ -705,6 +721,7 @@ export default function Controls() {
                   onClick={() => setScanMode("both")}
                   type="button"
                 >
+                  <Icon name="split" />
                   By both
                 </button>
                 <button
@@ -716,6 +733,7 @@ export default function Controls() {
                   type="button"
                   disabled={!parseScanLines(scanText).length}
                 >
+                  <Icon name="sparkle" />
                   Auto mode
                 </button>
               </div>
@@ -746,6 +764,7 @@ export default function Controls() {
                   runResolve(cands, `paste (${scanMode})`);
                 }}
               >
+                <Icon name="play" />
                 {resolving ? "Resolving..." : `Resolve ${lineCount} row${lineCount === 1 ? "" : "s"}`}
               </button>
               <button
@@ -754,6 +773,7 @@ export default function Controls() {
                 disabled={!scanText}
                 type="button"
               >
+                <Icon name="eraser" />
                 Clear
               </button>
             </div>
@@ -787,6 +807,7 @@ export default function Controls() {
               onChange={(e) => setManualCategory(e.target.value)}
             />
             <button className="btn primary" type="submit">
+              <Icon name="plus" />
               Track
             </button>
           </form>
@@ -800,6 +821,7 @@ export default function Controls() {
             thing the daily automatic check does.
           </p>
           <button className="btn primary" onClick={runCheckNow} disabled={checking}>
+            <Icon name="refresh" />
             {checking ? "Checking..." : "Check now"}
           </button>
           {checkStatus && <p className="status">{checkStatus}</p>}
@@ -815,15 +837,19 @@ export default function Controls() {
           <p className="hint">Download your tracked places or the full rename history.</p>
           <div className="row">
             <a className="btn" href="/api/places/export?type=places&format=csv">
+              <Icon name="download" />
               Places · CSV
             </a>
             <a className="btn" href="/api/places/export?type=places&format=json">
+              <Icon name="download" />
               Places · JSON
             </a>
             <a className="btn" href="/api/places/export?type=history&format=csv">
+              <Icon name="download" />
               History · CSV
             </a>
             <a className="btn" href="/api/places/export?type=history&format=json">
+              <Icon name="download" />
               History · JSON
             </a>
           </div>

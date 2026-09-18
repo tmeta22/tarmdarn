@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { CATEGORIES, categoryLabel } from "../lib/categories";
+import Icon from "../components/Icon";
 
 const SORT_OPTIONS = [
   { value: "name_asc", label: "Name (A–Z)" },
@@ -14,7 +15,7 @@ function CopyButton({ text }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
-      className="copy-btn"
+      className={`copy-btn${copied ? " copied" : ""}`}
       title="Copy place_id"
       onClick={async () => {
         try {
@@ -28,10 +29,19 @@ function CopyButton({ text }) {
           document.body.removeChild(ta);
         }
         setCopied(true);
-        setTimeout(() => setCopied(false), 1400);
+        setTimeout(() => setCopied(false), 1600);
       }}
     >
-      {copied ? "✓" : "⧉"}
+      {copied ? (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m5 12.5 4.5 4.5L19 7.5" />
+        </svg>
+      ) : (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="9" y="9" width="11" height="11" rx="2" />
+          <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+        </svg>
+      )}
     </button>
   );
 }
@@ -317,7 +327,7 @@ export default function Dashboard() {
             {p.last_checked_at ? new Date(p.last_checked_at).toLocaleString() : "never"}
           </td>
           <td>
-            <div className="row" style={{ justifyContent: "flex-end" }}>
+            <div className="row row-actions">
               {isEditing ? (
                 <>
                   <button
@@ -325,18 +335,22 @@ export default function Dashboard() {
                     disabled={editStatusFor === "saving"}
                     onClick={() => saveEditing(p.place_id)}
                   >
+                    <Icon name="check" />
                     {editStatusFor === "saving" ? "Saving..." : "Save"}
                   </button>
                   <button className="btn" disabled={editStatusFor === "saving"} onClick={cancelEditing}>
+                    <Icon name="close" />
                     Cancel
                   </button>
                 </>
               ) : (
                 <button className="btn" onClick={() => startEditing(p)}>
+                  <Icon name="edit" />
                   Edit
                 </button>
               )}
               <button className="btn" onClick={() => toggleHistory(p.place_id)}>
+                <Icon name="history" />
                 History
               </button>
               <button
@@ -344,6 +358,7 @@ export default function Dashboard() {
                 onClick={() => removePlace(p.place_id)}
                 disabled={isEditing}
               >
+                <Icon name="trash" />
                 Remove
               </button>
             </div>
@@ -361,7 +376,9 @@ export default function Dashboard() {
                   hist.map((h) => (
                     <div className="change" key={h.id}>
                       <span className="arrow-line">
-                        {h.old_name} → {h.new_name}
+                        {h.old_name}
+                        <Icon name="arrow" />
+                        {h.new_name}
                       </span>
                       <br />
                       {new Date(h.changed_at).toLocaleString()}
@@ -397,20 +414,29 @@ export default function Dashboard() {
       </div>
 
       <div className="bento-grid">
-        <div className="bento-card accent-jade">
-          <div className="bento-kicker">Tracked places</div>
+        <div className="bento-card stat-card accent">
+          <div className="bento-kicker">
+            <span className="accent-dot" />
+            Tracked places
+          </div>
           <div className="bento-value">{stats ? stats.totalPlaces : "—"}</div>
           <div className="bento-foot">across {stats ? stats.totalCategories : "—"} categories</div>
         </div>
 
-        <div className="bento-card accent-gold">
-          <div className="bento-kicker">Renames logged</div>
+        <div className="bento-card stat-card gold">
+          <div className="bento-kicker">
+            <span className="accent-dot gold" />
+            Renames logged
+          </div>
           <div className="bento-value">{stats ? stats.totalRenames : "—"}</div>
           <div className="bento-foot">all-time</div>
         </div>
 
-        <div className="bento-card">
-          <div className="bento-kicker">Last checked</div>
+        <div className="bento-card stat-card">
+          <div className="bento-kicker">
+            <span className="accent-dot muted" />
+            Last checked
+          </div>
           <div className="bento-value bento-value-sm">
             {stats && stats.lastCheckedAt
               ? new Date(stats.lastCheckedAt).toLocaleString(undefined, {
@@ -424,8 +450,11 @@ export default function Dashboard() {
           <div className="bento-foot">most recent run</div>
         </div>
 
-        <div className={dupCount ? "bento-card accent-ruby" : "bento-card"}>
-          <div className="bento-kicker">Possible duplicates</div>
+        <div className={dupCount ? "bento-card stat-card danger" : "bento-card stat-card"}>
+          <div className="bento-kicker">
+            <span className={`accent-dot${dupCount ? " danger" : " muted"}`} />
+            Possible duplicates
+          </div>
           <div className="bento-value bento-value-sm">
           {duplicates === null ? (loadingDup ? "…" : dupCount ?? "Click to scan") : dupCount}
           </div>
@@ -436,13 +465,17 @@ export default function Dashboard() {
               disabled={loadingDup}
               type="button"
             >
+              <Icon name="refresh" />
               {loadingDup ? "Scanning..." : "Scan now"}
             </button>
           </div>
         </div>
 
-        <div className="bento-card">
-          <div className="bento-kicker">Next auto-check</div>
+        <div className="bento-card stat-card">
+          <div className="bento-kicker">
+            <span className="accent-dot muted" />
+            Next auto-check
+          </div>
           <div className="bento-value bento-value-sm">
             {next.toLocaleString(undefined, {
               month: "short",
@@ -455,7 +488,7 @@ export default function Dashboard() {
         </div>
 
         {duplicates && duplicates.length > 0 && (
-          <div className="bento-card bento-card--wide dup-card accent-ruby">
+          <div className="bento-card bento-card--wide dup-card">
           <div className="row" style={{ justifyContent: "space-between" }}>
             <div>
               <h2 style={{ margin: "0 0 4px" }}>Possible duplicate place IDs</h2>
@@ -471,6 +504,7 @@ export default function Dashboard() {
               disabled={loadingDup}
               type="button"
             >
+              <Icon name="refresh" />
               {loadingDup ? "Rescanning..." : "Rescan"}
             </button>
           </div>
@@ -546,20 +580,27 @@ export default function Dashboard() {
                           </div>
                           <div className="dup-row-probe">
                             {probe?.alive ? (
-                              <span className="probe ok">● live</span>
+                              <span className="probe ok">
+                                <span className="dot" />
+                                live
+                              </span>
                             ) : probe?.alive === false ? (
                               <span
                                 className={`probe ${probe.notFound ? "bad" : "warn"}`}
                               >
+                                <span className="dot" />
                                 {probe.notFound
-                                  ? "○ 404 / removed by Google"
-                                  : "○ probe failed"}
+                                  ? "404 / removed by Google"
+                                  : "probe failed"}
                               </span>
                             ) : (
-                              <span className="probe">◌ not probed</span>
+                              <span className="probe">
+                                <span className="dot" />
+                                not probed
+                              </span>
                             )}
                             {isCanonical && c.canonicalPlaceId === row.place_id && (
-                              <span className="hint dup-suggest">· suggested</span>
+                              <span className="hint dup-suggest">suggested</span>
                             )}
                           </div>
                         </label>
@@ -573,11 +614,16 @@ export default function Dashboard() {
                       disabled={status === "merging"}
                       type="button"
                     >
-                      {status === "merging"
-                        ? "Merging..."
-                        : `Keep ${chosenCanonical.slice(0, 14)}… and remove ${
+                      {status === "merging" ? (
+                        "Merging..."
+                      ) : (
+                        <>
+                          <Icon name="merge" />
+                          {`Keep ${chosenCanonical.slice(0, 14)}… and remove ${
                             c.placeIds.length - 1
                           }`}
+                        </>
+                      )}
                     </button>
                     <div className="dup-status">
                       {typeof status === "string" && status !== "merging"
@@ -686,7 +732,9 @@ export default function Dashboard() {
                 <div className="feed-item" key={`${h.place_id}-${h.changed_at}`}>
                   <div className="feed-names">
                     <span className="feed-old">{h.old_name}</span>
-                    <span className="feed-arrow">→</span>
+                    <span className="feed-arrow">
+                      <Icon name="arrow" />
+                    </span>
                     <span className="feed-new">{h.new_name}</span>
                   </div>
                   <div className="feed-meta">
