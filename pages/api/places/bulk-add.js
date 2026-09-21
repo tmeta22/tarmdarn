@@ -8,6 +8,16 @@ export default async function handler(req, res) {
     return res.status(405).end();
   }
 
+  try {
+    return await bulkAdd(req, res);
+  } catch (err) {
+    // Without this a throw escapes as a bare 500 with no body, which is
+    // impossible to diagnose from the browser. The client shows this text.
+    return res.status(500).json({ error: String(err?.message || err) });
+  }
+}
+
+async function bulkAdd(req, res) {
   const { places, category, source } = req.body || {};
   if (!Array.isArray(places) || places.length === 0) {
     return res.status(400).json({ error: "places (array) is required" });

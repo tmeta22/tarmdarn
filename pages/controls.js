@@ -89,6 +89,31 @@ const PLACE_ID_RE = /^[A-Za-z0-9_-]{10,}$/;
 // splits large inputs into batches of this size.
 const RESOLVE_BATCH = 100;
 
+// A bulk add posts the whole selection, and Next.js caps an API route body
+// at 1 MB. Rows carry a name, address and types array, so pack by encoded
+// size rather than row count — Khmer text is 3 bytes per character in
+// UTF-8, which a plain string length would badly undercount.
+const ADD_BODY_BUDGET = 400 * 1024;
+const utf8 = new TextEncoder();
+
+function chunkByBytes(rows, budget = ADD_BODY_BUDGET) {
+  const chunks = [];
+  let current = [];
+  let size = 0;
+  for (const row of rows) {
+    const rowSize = utf8.encode(JSON.stringify(row)).length + 1;
+    if (current.length > 0 && size + rowSize > budget) {
+      chunks.push(current);
+      current = [];
+      size = 0;
+    }
+    current.push(row);
+    size += rowSize;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
 /** Human-readable summary of a Telegram send result. */
 function describePush(result) {
   if (!result) return "";
@@ -300,6 +325,7 @@ export default function Controls() {
   const [scanText, setScanText] = useState("");
   const [resolving, setResolving] = useState(false);
   const [resolveErrors, setResolveErrors] = useState([]);
+  const [adding, setAdding] = useState(false);
   const csvInputRef = useRef(null);
 
   // --- CSV import: parsed file + how its columns map onto our fields ---
@@ -624,6 +650,7 @@ export default function Controls() {
       setSearchStatus("Those are already tracked — nothing new to add.");
       return;
     }
+    setAdding(true);
     setSearchStatus(`Adding ${fresh.length}...`);
     const overrideCategory = searchCategory.trim() || null;
     const rows = fresh.map((p) => ({
@@ -631,22 +658,52 @@ export default function Controls() {
       label: p.label || p.address || null,
       category: overrideCategory ?? p.category ?? effectiveCategoryFor(p.placeId) ?? null,
     }));
-    const res = await fetch("/api/places/bulk-add", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ places: rows, category: overrideCategory, source: resultsSource }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setSearchStatus(data.error || "Failed to add");
-      return;
+
+    const chunks = chunkByBytes(rows);
+    const added = [];
+    const failures = [];
+    let skipped = 0;
+
+    for (let i = 0; i < chunks.length; i++) {
+      if (chunks.length > 1) {
+        setSearchStatus(
+          `Adding ${added.length + 1}–${added.length + chunks[i].length} of ${fresh.length}...`
+        );
+      }
+      try {
+        const res = await fetch("/api/places/bulk-add", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            places: chunks[i],
+            category: overrideCategory,
+            source: resultsSource,
+          }),
+        });
+        // A body-limit rejection or a crash replies with text, not JSON, so
+        // reading it as JSON would throw and lose the reason.
+        const data = await res.json().catch(async () => ({
+          error: (await res.text().catch(() => "")).slice(0, 200) || `HTTP ${res.status}`,
+        }));
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        added.push(...(data.places || []));
+        skipped += data.skipped || 0;
+      } catch (err) {
+        failures.push(String(err.message || err));
+      }
     }
-    const skippedNote = data.skipped ? ` (${data.skipped} already tracked, skipped)` : "";
-    setSearchStatus(
-      `Now tracking ${data.added} new place${data.added === 1 ? "" : "s"}.${skippedNote}`
-    );
+
     setSelected({});
-    setPlaces((prev) => [...prev, ...data.places]);
+    if (added.length > 0) setPlaces((prev) => [...prev, ...added]);
+    const parts = [`Now tracking ${added.length} new place${added.length === 1 ? "" : "s"}.`];
+    if (skipped) parts.push(`${skipped} already tracked.`);
+    if (failures.length) {
+      parts.push(
+        `${failures.length} batch${failures.length === 1 ? "" : "es"} failed — ${failures[0]}`
+      );
+    }
+    setSearchStatus(parts.join(" "));
+    setAdding(false);
   }
 
   function addSelected() {
@@ -863,14 +920,18 @@ export default function Controls() {
                 })}
               </div>
               <div className="row" style={{ marginTop: 14 }}>
-                <button className="btn primary" onClick={addSelected} disabled={addableResultsCount === 0}>
+                <button
+                  className="btn primary"
+                  onClick={addSelected}
+                  disabled={addableResultsCount === 0 || adding}
+                >
                   <Icon name="checkSquare" />
                   Add selected
                 </button>
                 <button
                   className="btn icon-only"
                   onClick={addAllLoaded}
-                  disabled={addableResultsCount === 0}
+                  disabled={addableResultsCount === 0 || adding}
                   title={`Add all ${addableResultsCount} new results`}
                   aria-label={`Add all ${addableResultsCount} new results`}
                 >
