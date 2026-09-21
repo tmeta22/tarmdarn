@@ -1,4 +1,4 @@
-import { supabase } from "../../../lib/supabase";
+import { supabase, selectAll } from "../../../lib/supabase";
 
 // Excel ignores the charset in Content-Type when opening a .csv and falls
 // back to the system ANSI codepage, which mangles Khmer text. A leading
@@ -29,11 +29,20 @@ export default async function handler(req, res) {
   const db = supabase();
 
   if (type === "history") {
-    const { data, error } = await db
-      .from("place_name_history")
-      .select("*, tracked_places(label, category, current_name)")
-      .order("changed_at", { ascending: false });
-    if (error) return res.status(500).json({ error: error.message });
+    let data;
+    try {
+      // Paged: an export that silently stops at 1000 rows is worse than a
+      // failed one, because the file looks complete.
+      data = await selectAll(() =>
+        db
+          .from("place_name_history")
+          .select("*, tracked_places(label, category, current_name)")
+          .order("changed_at", { ascending: false })
+          .order("id", { ascending: false })
+      );
+    } catch (err) {
+      return res.status(500).json({ error: String(err?.message || err) });
+    }
 
     const rows = (data || []).map((h) => ({
       place_id: h.place_id,
@@ -62,11 +71,19 @@ export default async function handler(req, res) {
     return res.status(200).send(csv);
   }
 
-  const { data, error } = await db
-    .from("tracked_places")
-    .select("*")
-    .order("created_at", { ascending: false });
-  if (error) return res.status(500).json({ error: error.message });
+  let data;
+  try {
+    // Same 1000-row cap applied here, so a big export was quietly short.
+    data = await selectAll(() =>
+      db
+        .from("tracked_places")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+    );
+  } catch (err) {
+    return res.status(500).json({ error: String(err?.message || err) });
+  }
 
   if (format === "json") {
     res.setHeader("Content-Type", "application/json");

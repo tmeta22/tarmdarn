@@ -1,4 +1,4 @@
-import { supabase } from "../../lib/supabase";
+import { supabase, selectAll } from "../../lib/supabase";
 import { categoryLabel } from "../../lib/categories";
 
 export default async function handler(req, res) {
@@ -9,16 +9,26 @@ export default async function handler(req, res) {
 
   const db = supabase();
 
-  const [placesResult, renameCountResult] = await Promise.all([
-    db.from("tracked_places").select("category, last_checked_at"),
-    db.from("place_name_history").select("id", { count: "exact", head: true }),
-  ]);
-
-  if (placesResult.error) return res.status(500).json({ error: placesResult.error.message });
+  const renameCountResult = await db
+    .from("place_name_history")
+    .select("id", { count: "exact", head: true });
   if (renameCountResult.error)
     return res.status(500).json({ error: renameCountResult.error.message });
 
-  const places = placesResult.data || [];
+  let places;
+  try {
+    // Paged: one Supabase response stops at 1000 rows, so this total used to
+    // read exactly 1000 no matter how many places were tracked.
+    places = await selectAll(() =>
+      db
+        .from("tracked_places")
+        .select("category, last_checked_at")
+        .order("id", { ascending: true })
+    );
+  } catch (err) {
+    return res.status(500).json({ error: String(err?.message || err) });
+  }
+
   const categories = new Set(places.map((p) => categoryLabel(p.category)));
   const lastCheckedAt = places.reduce((latest, p) => {
     if (!p.last_checked_at) return latest;

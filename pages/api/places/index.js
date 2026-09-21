@@ -1,4 +1,4 @@
-import { supabase } from "../../../lib/supabase";
+import { supabase, selectAll } from "../../../lib/supabase";
 import { getPlaceName } from "../../../lib/places";
 import { guessCategoryFromPlace } from "../../../lib/categories";
 import { sendTelegramMessage, formatPlacesAdded } from "../../../lib/telegram";
@@ -7,12 +7,20 @@ export default async function handler(req, res) {
   const db = supabase();
 
   if (req.method === "GET") {
-    const { data, error } = await db
-      .from("tracked_places")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (error) return res.status(500).json({ error: error.message });
-    return res.status(200).json(data);
+    try {
+      // Paged: a bare select stops at 1000 rows, which is why the dashboard
+      // appeared to only ever hold 1000 places.
+      const rows = await selectAll(() =>
+        db
+          .from("tracked_places")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
+      );
+      return res.status(200).json(rows);
+    } catch (err) {
+      return res.status(500).json({ error: String(err?.message || err) });
+    }
   }
 
   if (req.method === "POST") {

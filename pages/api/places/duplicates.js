@@ -1,4 +1,4 @@
-import { supabase } from "../../../lib/supabase";
+import { supabase, selectAll } from "../../../lib/supabase";
 import { getPlaceName } from "../../../lib/places";
 import { sendTelegramMessage, formatDuplicatesFound } from "../../../lib/telegram";
 
@@ -197,8 +197,15 @@ export default async function handler(req, res) {
   }
 
   // ---------- Duplicate scan ----------
-  const { data: places, error } = await db.from("tracked_places").select("*");
-  if (error) return res.status(500).json({ error: error.message });
+  let places;
+  try {
+    // Paged: capped at 1000, a duplicate scan could not see most of the table.
+    places = await selectAll(() =>
+      db.from("tracked_places").select("*").order("id", { ascending: true })
+    );
+  } catch (err) {
+    return res.status(500).json({ error: String(err?.message || err) });
+  }
 
   const byPlaceId = new Map((places || []).map((p) => [p.place_id, p]));
 
