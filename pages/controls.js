@@ -678,6 +678,11 @@ export default function Controls() {
             places: chunks[i],
             category: overrideCategory,
             source: resultsSource,
+            // Only the last chunk pushes, and it sends the running totals so
+            // a big import produces one summary rather than one per chunk.
+            notify: i === chunks.length - 1,
+            alreadyAdded: added.length,
+            alreadySkipped: skipped,
           }),
         });
         // A body-limit rejection or a crash replies with text, not JSON, so

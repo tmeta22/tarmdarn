@@ -2,6 +2,10 @@ import { supabase } from "../../../lib/supabase";
 import { guessCategoryFromPlace } from "../../../lib/categories";
 import { sendTelegramMessage, formatPlacesAdded } from "../../../lib/telegram";
 
+// A chunked import arrives as several requests; each one inserts a large
+// batch and then pushes a notification, so the default 10s is not enough.
+export const config = { maxDuration: 60 };
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", ["POST"]);
@@ -18,10 +22,24 @@ export default async function handler(req, res) {
 }
 
 async function bulkAdd(req, res) {
-  const { places, category, source } = req.body || {};
+  const {
+    places,
+    category,
+    source,
+    // A chunked import makes several requests; only the last one should
+    // push, and it reports the whole run via alreadyAdded/alreadySkipped
+    // rather than just its own slice.
+    notify = true,
+    alreadyAdded = 0,
+    alreadySkipped = 0,
+  } = req.body || {};
   if (!Array.isArray(places) || places.length === 0) {
     return res.status(400).json({ error: "places (array) is required" });
   }
+
+  const addedBefore = Number(alreadyAdded) || 0;
+  const skippedBefore = Number(alreadySkipped) || 0;
+  const sourceLabel = source ? String(source) : "bulk add";
 
   const db = supabase();
 
@@ -39,7 +57,20 @@ async function bulkAdd(req, res) {
   const skipped = places.length - toInsert.length;
 
   if (toInsert.length === 0) {
-    return res.status(200).json({ added: 0, skipped, places: [] });
+    // Nothing new in this batch, but a chunked run still owes the user one
+    // summary covering everything the earlier chunks added.
+    const telegram =
+      notify !== false && addedBefore > 0
+        ? await sendTelegramMessage(
+            formatPlacesAdded({
+              added: addedBefore,
+              skipped: skippedBefore + skipped,
+              source: sourceLabel,
+              names: [],
+            })
+          )
+        : null;
+    return res.status(200).json({ added: 0, skipped, places: [], telegram });
   }
 
   const rows = toInsert.map((p) => {
@@ -68,14 +99,19 @@ async function bulkAdd(req, res) {
 
   if (error) return res.status(500).json({ error: error.message });
 
-  const telegram = await sendTelegramMessage(
-    formatPlacesAdded({
-      added: data.length,
-      skipped,
-      source: source ? String(source) : "bulk add",
-      names: data.map((p) => p.current_name || p.label || p.place_id),
-    })
-  );
+  // One push for the whole run: previous chunks report their counts so the
+  // final message is a total, not the last slice.
+  const telegram =
+    notify === false
+      ? null
+      : await sendTelegramMessage(
+          formatPlacesAdded({
+            added: addedBefore + data.length,
+            skipped: skippedBefore + skipped,
+            source: sourceLabel,
+            names: data.map((p) => p.current_name || p.label || p.place_id),
+          })
+        );
 
   return res.status(200).json({ added: data.length, skipped, places: data, telegram });
 }
