@@ -1,11 +1,14 @@
-import { runPlaceCheck } from "../../../lib/check";
+import { runCheckRound } from "../../../lib/check";
 import { sendTelegramMessage, formatCheckSummary } from "../../../lib/telegram";
 
 export const config = { maxDuration: 60 };
 
 /**
- * Manual "Check now". Same work as the cron route, but reachable from the
+ * Manual "Check now". Same sweep as the cron route, but reachable from the
  * browser without shipping CRON_SECRET to the client.
+ *
+ * A full sweep is several rounds, so the browser gets this round's response
+ * and the remaining rounds continue server-side.
  */
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -14,29 +17,32 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { results, skipped } = await runPlaceCheck();
-    const changed = results.filter((r) => r.changed).length;
-    const gone = results.filter((r) => r.gone).length;
-    const failed = results.filter((r) => r.error).length;
+    const round = await runCheckRound(req);
 
-    const telegram = await sendTelegramMessage(
-      formatCheckSummary({
-        checked: results.length,
-        changed,
-        skipped,
-        results,
-        trigger: "Manual",
-      })
-    );
+    const telegram = round.finished
+      ? await sendTelegramMessage(
+          formatCheckSummary({
+            checked: round.totals.checked,
+            changed: round.totals.changed,
+            gone: round.totals.gone,
+            failed: round.totals.failed,
+            renamed: round.renamed,
+            skipped: round.skipped,
+            rounds: round.round,
+            trigger: "Manual",
+          })
+        )
+      : null;
 
     return res.status(200).json({
-      checked: results.length,
-      skipped,
-      changed,
-      gone,
-      failed,
-      retryable: results.filter((r) => r.retryable).length,
-      results,
+      round: round.round,
+      rounds: round.round,
+      finished: round.finished,
+      checked: round.totals.checked,
+      skipped: round.skipped,
+      changed: round.totals.changed,
+      gone: round.totals.gone,
+      failed: round.totals.failed,
       telegram,
     });
   } catch (err) {

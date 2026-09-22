@@ -1,15 +1,15 @@
-import { runPlaceCheck } from "../../../lib/check";
+import { runCheckRound } from "../../../lib/check";
 import { sendTelegramMessage, formatCheckSummary } from "../../../lib/telegram";
 
-// The check is paced to protect the API quota, so walking every place can
-// take far longer than the default 10s function limit.
+// One round is paced and budgeted at ~45s; the sweep continues in further
+// invocations, so this needs headroom above the default 10s.
 export const config = { maxDuration: 60 };
 
 export default async function handler(req, res) {
   // Vercel Cron sends "Authorization: Bearer <CRON_SECRET>" automatically
   // when a CRON_SECRET env var is set. Manual runs from the app go through
   // /api/places/check instead, which doesn't require the secret — so the
-  // secret never has to reach the browser.
+  // secret never has to reach the browser. Chained rounds carry it forward.
   if (process.env.CRON_SECRET) {
     const auth = req.headers.authorization;
     if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -18,29 +18,34 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { results, skipped } = await runPlaceCheck();
-    const changed = results.filter((r) => r.changed).length;
+    const round = await runCheckRound(req);
 
-    // Fire a Telegram push every time a check completes.
-    // Silently skipped if TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID aren't set.
-    const telegram = await sendTelegramMessage(
-      formatCheckSummary({
-        checked: results.length,
-        changed,
-        skipped,
-        results,
-        trigger: "Scheduled",
-      })
-    );
+    // Only the round that completes the sweep notifies, so one sweep is one
+    // message rather than one per round.
+    const telegram = round.finished
+      ? await sendTelegramMessage(
+          formatCheckSummary({
+            checked: round.totals.checked,
+            changed: round.totals.changed,
+            gone: round.totals.gone,
+            failed: round.totals.failed,
+            renamed: round.renamed,
+            skipped: round.skipped,
+            rounds: round.round,
+            trigger: "Scheduled",
+          })
+        )
+      : null;
 
     return res.status(200).json({
-      checked: results.length,
-      skipped,
-      changed,
-      gone: results.filter((r) => r.gone).length,
-      failed: results.filter((r) => r.error).length,
-      retryable: results.filter((r) => r.retryable).length,
-      results,
+      round: round.round,
+      rounds: round.round,
+      finished: round.finished,
+      checked: round.totals.checked,
+      skipped: round.skipped,
+      changed: round.totals.changed,
+      gone: round.totals.gone,
+      failed: round.totals.failed,
       telegram,
     });
   } catch (err) {

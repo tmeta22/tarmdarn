@@ -769,6 +769,15 @@ export default function Controls() {
       ];
       if (data.gone) parts.push(`${data.gone} no longer on Google.`);
       if (data.failed) parts.push(`${data.failed} lookup${data.failed === 1 ? "" : "s"} failed.`);
+      if (!data.finished && data.skipped) {
+        // A sweep is several rounds; the rest continue server-side, so the
+        // push with the finished totals arrives later.
+        parts.push(
+          `${data.skipped} still to go — the remaining rounds are running now, and the Telegram summary lands when the sweep finishes.`
+        );
+      } else if (data.round > 1) {
+        parts.push(`Full sweep finished in ${data.round} rounds.`);
+      }
       parts.push(describePush(data.telegram));
       setCheckStatus(parts.join(" "));
     } catch (err) {
