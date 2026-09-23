@@ -1001,6 +1001,12 @@ tbody tr:hover td {
   border-color: var(--border);
 }
 
+.badge.gone {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+  color: var(--danger);
+}
+
 /* ---------- Place ID + copy ---------- */
 
 .place-id-cell {

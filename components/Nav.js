@@ -23,6 +23,17 @@ const LINKS = [
     ),
   },
   {
+    href: "/reports",
+    label: "Reports",
+    icon: (
+      <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M6.5 3.5h8L19 8v12.5a1 1 0 0 1-1 1H6.5a1 1 0 0 1-1-1v-16a1 1 0 0 1 1-1Z" />
+        <path d="M14.2 3.6V8H19" />
+        <path d="M9 13.5h6M9 17h4" />
+      </svg>
+    ),
+  },
+  {
     href: "/controls",
     label: "Controls",
     icon: (

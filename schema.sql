@@ -6,7 +6,9 @@ create table if not exists tracked_places (
   category text,                         -- free text, any place type — 'School', 'Market', 'Pagoda', etc.
   label text,                            -- your own note / address
   current_name text,
-  last_checked_at timestamptz,
+  last_checked_at timestamptz,           -- last lookup attempt, successful or not
+  last_seen_at timestamptz,              -- last time Google still served this place
+  gone_at timestamptz,                   -- first seen missing from Google; null while live
   created_at timestamptz default now()
 );
 
@@ -20,3 +22,9 @@ create table if not exists place_name_history (
 
 create index if not exists idx_history_place_id on place_name_history(place_id);
 create index if not exists idx_tracked_category on tracked_places(category);
+create index if not exists idx_tracked_gone_at
+  on tracked_places(gone_at desc)
+  where gone_at is not null;
+create index if not exists idx_tracked_gone_at
+  on tracked_places(gone_at desc)
+  where gone_at is not null;

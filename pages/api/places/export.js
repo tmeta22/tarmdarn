@@ -18,13 +18,19 @@ function toCsv(rows, columns) {
   return BOM + [header, ...lines].join("\n");
 }
 
+/** Whole days since an ISO timestamp — the report's "missing for" duration. */
+function daysSince(iso) {
+  if (!iso) return "";
+  return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000));
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     res.setHeader("Allow", ["GET"]);
     return res.status(405).end();
   }
 
-  const type = req.query.type === "history" ? "history" : "places";
+  const type = ["history", "gone"].includes(req.query.type) ? req.query.type : "places";
   const format = req.query.format === "json" ? "json" : "csv";
   const db = supabase();
 
@@ -68,6 +74,46 @@ export default async function handler(req, res) {
     ]);
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", 'attachment; filename="taamdan-history.csv"');
+    return res.status(200).send(csv);
+  }
+
+  if (type === "gone") {
+    let data;
+    try {
+      data = await selectAll(() =>
+        db
+          .from("tracked_places")
+          .select(
+            "place_id, label, category, current_name, gone_at, last_seen_at, last_checked_at"
+          )
+          .not("gone_at", "is", null)
+          .order("gone_at", { ascending: false })
+          .order("id", { ascending: true })
+      );
+    } catch (err) {
+      return res.status(500).json({ error: String(err?.message || err) });
+    }
+
+    // days_gone is filled in at export time so the file is self-contained — a
+    // spreadsheet can read it without doing date arithmetic of its own.
+    const rows = (data || []).map((p) => ({ ...p, days_gone: daysSince(p.gone_at) }));
+
+    if (format === "json") {
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Content-Disposition", 'attachment; filename="taamdan-gone.json"');
+      return res.status(200).send(JSON.stringify(rows, null, 2));
+    }
+    const csv = toCsv(rows, [
+      { key: "place_id", label: "place_id" },
+      { key: "label", label: "label" },
+      { key: "category", label: "category" },
+      { key: "current_name", label: "last_known_name" },
+      { key: "gone_at", label: "gone_at" },
+      { key: "days_gone", label: "days_gone" },
+      { key: "last_seen_at", label: "last_seen_at" },
+    ]);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="taamdan-gone.csv"');
     return res.status(200).send(csv);
   }
 
