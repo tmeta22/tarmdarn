@@ -1,9 +1,10 @@
 import { runCheckRound } from "../../../lib/check";
 import { sendTelegramMessage, formatCheckSummary } from "../../../lib/telegram";
 
-// One round is paced and budgeted at ~45s; the sweep continues in further
-// invocations, so this needs headroom above the default 10s.
-export const config = { maxDuration: 60 };
+// A run is paced and budgeted so one invocation can cover the whole table
+// (~260s), which needs a ceiling well above the 10s default. Anything a run
+// doesn't get through is handed to the next invocation.
+export const config = { maxDuration: 300 };
 
 export default async function handler(req, res) {
   // Vercel Cron sends "Authorization: Bearer <CRON_SECRET>" automatically

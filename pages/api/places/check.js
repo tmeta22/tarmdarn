@@ -1,7 +1,8 @@
 import { runCheckRound } from "../../../lib/check";
 import { sendTelegramMessage, formatCheckSummary } from "../../../lib/telegram";
 
-export const config = { maxDuration: 60 };
+// Same headroom as the cron route: one run covers the whole table (~260s).
+export const config = { maxDuration: 300 };
 
 /**
  * Manual "Check now". Same sweep as the cron route, but reachable from the
